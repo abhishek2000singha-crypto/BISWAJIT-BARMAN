@@ -1,0 +1,8 @@
+{
+  "name": "REELS KING",
+  "description": "A production-ready Reels platform with AI-powered content moderation, video boosting via Razorpay, and creator monetization.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

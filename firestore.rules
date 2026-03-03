@@ -1,0 +1,66 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // User Profiles
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && (
+        request.auth.uid == userId || 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followersCount', 'followingCount']) ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    // Follows
+    match /follows/{followId} {
+      allow read: if true;
+      allow create: if request.auth != null && request.resource.data.followerId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.followerId == request.auth.uid;
+    }
+
+    // Boost Transactions
+    match /boost_transactions/{txId} {
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+    }
+    
+    // Videos
+    match /videos/{videoId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'viewsCount', 'sharesCount', 'commentsCount']) ||
+        resource.data.userId == request.auth.uid ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+      allow delete: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+    
+    // Comments
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow delete: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+    
+    // Payments (Read-only for users, write for admin/system)
+    match /payments/{paymentId} {
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+      allow write: if false; // Only via Cloud Functions/Admin SDK
+    }
+  }
+}
