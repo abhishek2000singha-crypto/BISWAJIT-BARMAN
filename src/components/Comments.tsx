@@ -3,8 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Send, Loader2, MessageCircle } from 'lucide-react';
 import { collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, increment, getDoc } from 'firebase/firestore';
 import { db, auth } from '../services/firebase';
-import { Comment, User } from '../types';
+import { Comment, User, Video } from '../types';
 import { formatDistanceToNow } from 'date-fns';
+import { sendNotification } from '../services/notificationService';
 
 interface CommentsProps {
   videoId: string;
@@ -65,9 +66,28 @@ export const Comments: React.FC<CommentsProps> = ({ videoId, onClose, onUserClic
       
       // Update comment count on video
       const videoRef = doc(db, 'videos', videoId);
+      const videoSnap = await getDoc(videoRef);
+      
       await updateDoc(videoRef, {
         commentsCount: increment(1)
       });
+
+      // Send notification to video owner
+      if (videoSnap.exists()) {
+        const videoData = videoSnap.data() as Video;
+        if (videoData.userId !== auth.currentUser.uid) {
+          sendNotification({
+            userId: videoData.userId,
+            senderId: auth.currentUser.uid,
+            senderName: userData.name,
+            senderProfileImage: userData.profileImage,
+            type: 'comment',
+            videoId: videoId,
+            videoThumbnail: videoData.thumbnailUrl || videoData.videoUrl,
+            message: `commented on your post: "${newComment.trim().substring(0, 30)}${newComment.trim().length > 30 ? '...' : ''}"`
+          });
+        }
+      }
 
       setNewComment('');
     } catch (error) {

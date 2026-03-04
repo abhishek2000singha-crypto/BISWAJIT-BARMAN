@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { User, Grid, Heart, Settings, Wallet, Rocket, CheckCircle2, IndianRupee, Eye, MessageCircle, Share2, LayoutDashboard, Camera, Edit3, Loader2, LogOut, ChevronLeft, Sparkles, Gift, Clock, AlertCircle, X, Landmark, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { BOOST_PLANS, BoostPlan, User as UserType, BoostTransaction, Video as VideoType } from '../types';
+import { BOOST_PLANS, BoostPlan, User as UserType, BoostTransaction, Video as VideoType, Transaction as WalletTransaction, WithdrawalRequest } from '../types';
 import { Logo } from './Logo';
 import { VideoCard } from './VideoCard';
 import { MonetizationDashboard } from './MonetizationDashboard';
 import { SuperChatModal } from './SuperChatModal';
+import { BoostModal } from './BoostModal';
 import confetti from 'canvas-confetti';
 import { doc, updateDoc, collection, addDoc, query, where, orderBy, onSnapshot, getDoc, writeBatch, increment, getDocs } from 'firebase/firestore';
 import { db } from '../services/firebase';
@@ -33,8 +34,13 @@ export const Profile: React.FC<{
   const [showFollowersModal, setShowFollowersModal] = useState(false);
   const [showFollowingModal, setShowFollowingModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'videos' | 'likes' | 'history' | 'dashboard'>('videos');
+  const [activeTab, setActiveTab] = useState<'videos' | 'likes' | 'history' | 'dashboard' | 'wallet'>('videos');
   const [transactions, setTransactions] = useState<BoostTransaction[]>([]);
+  const [walletTransactions, setWalletTransactions] = useState<WalletTransaction[]>([]);
+  const [withdrawalRequests, setWithdrawalRequests] = useState<WithdrawalRequest[]>([]);
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [superChats, setSuperChats] = useState<any[]>([]);
   const [followers, setFollowers] = useState<UserType[]>([]);
   const [following, setFollowing] = useState<UserType[]>([]);
@@ -195,6 +201,107 @@ export const Profile: React.FC<{
       setFollowers([]);
     }
   }, [showFollowersModal, user?.uid]);
+
+  useEffect(() => {
+    if (activeTab === 'wallet' && user) {
+      const q = query(
+        collection(db, 'transactions'),
+        where('userId', '==', user.uid),
+        orderBy('createdAt', 'desc')
+      );
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const txs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as WalletTransaction));
+        setWalletTransactions(txs);
+      });
+
+      const qWithdraw = query(
+        collection(db, 'withdrawal_requests'),
+        where('userId', '==', user.uid),
+        orderBy('createdAt', 'desc')
+      );
+      const unsubscribeWithdraw = onSnapshot(qWithdraw, (snapshot) => {
+        const requests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as WithdrawalRequest));
+        setWithdrawalRequests(requests);
+      });
+
+      return () => {
+        unsubscribe();
+        unsubscribeWithdraw();
+      };
+    }
+  }, [activeTab, user?.uid]);
+
+  const handleWithdraw = async () => {
+    if (!user || !withdrawAmount) return;
+    const amount = parseFloat(withdrawAmount);
+    if (isNaN(amount) || amount <= 0) {
+      alert("Please enter a valid amount");
+      return;
+    }
+    if (amount > user.walletBalance) {
+      alert("Insufficient balance");
+      return;
+    }
+    if (amount < 100) {
+      alert("Minimum withdrawal amount is ₹100");
+      return;
+    }
+
+    if (!user.bankAccountNumber || !user.ifscCode || !user.accountHolderName) {
+      alert("Please complete your bank details in profile settings first");
+      setShowEditModal(true);
+      return;
+    }
+
+    setIsWithdrawing(true);
+    try {
+      const batch = writeBatch(db);
+      
+      // 1. Create withdrawal request
+      const requestRef = doc(collection(db, 'withdrawal_requests'));
+      batch.set(requestRef, {
+        userId: user.uid,
+        userName: user.name,
+        amount: amount,
+        status: 'pending',
+        bankDetails: {
+          accountNumber: user.bankAccountNumber,
+          ifscCode: user.ifscCode,
+          accountHolderName: user.accountHolderName,
+          bankName: user.bankName || ''
+        },
+        createdAt: Date.now()
+      });
+
+      // 2. Deduct from wallet balance
+      const userRef = doc(db, 'users', user.uid);
+      batch.update(userRef, {
+        walletBalance: increment(-amount)
+      });
+
+      // 3. Record transaction
+      const txRef = doc(collection(db, 'transactions'));
+      batch.set(txRef, {
+        userId: user.uid,
+        type: 'withdrawal',
+        amount: amount,
+        description: 'Withdrawal Request',
+        status: 'pending',
+        source: 'wallet_topup', // Reusing source for simplicity or could add 'withdrawal'
+        createdAt: Date.now()
+      });
+
+      await batch.commit();
+      alert("Withdrawal request submitted successfully!");
+      setShowWithdrawModal(false);
+      setWithdrawAmount('');
+    } catch (error) {
+      console.error("Withdrawal failed:", error);
+      alert("Failed to submit withdrawal request");
+    } finally {
+      setIsWithdrawing(false);
+    }
+  };
 
   useEffect(() => {
     if (activeTab === 'likes' && user) {
@@ -362,75 +469,6 @@ export const Profile: React.FC<{
       alert("Failed to update profile");
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleBoost = async (plan: BoostPlan) => {
-    if (!user || !videoToBoost) return;
-    try {
-      const response = await fetch('/api/payments/order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: plan.price, planId: plan.id })
-      });
-      const order = await response.json();
-
-      const options = {
-        key: (import.meta as any).env.VITE_RAZORPAY_KEY_ID || "rzp_test_placeholder",
-        amount: order.amount,
-        currency: "INR",
-        name: "REELS KING",
-        description: `Boost Plan: ${plan.name}`,
-        order_id: order.id,
-        handler: async function (response: any) {
-          const verifyRes = await fetch('/api/payments/verify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(response)
-          });
-          const result = await verifyRes.json();
-          if (result.success) {
-            // Record transaction
-            await addDoc(collection(db, 'boost_transactions'), {
-              userId: user.uid,
-              videoId: videoToBoost.id,
-              videoCaption: videoToBoost.caption || 'Recent Video',
-              planId: plan.id,
-              planName: plan.name,
-              amount: plan.price,
-              status: 'success',
-              createdAt: Date.now(),
-              expiryAt: Date.now() + (plan.durationDays * 86400000)
-            });
-
-            // Update video status in firestore
-            const videoRef = doc(db, 'videos', videoToBoost.id);
-            await updateDoc(videoRef, {
-              boosted: true,
-              boostExpiry: Date.now() + (plan.durationDays * 86400000)
-            });
-
-            confetti({
-              particleCount: 150,
-              spread: 70,
-              origin: { y: 0.6 }
-            });
-            setShowBoostModal(false);
-            setVideoToBoost(null);
-            alert("Video Boosted Successfully!");
-          }
-        },
-        prefill: {
-          name: user.name,
-          contact: user.mobile
-        },
-        theme: { color: "#F43F5E" }
-      };
-
-      const rzp = new (window as any).Razorpay(options);
-      rzp.open();
-    } catch (error) {
-      console.error("Payment failed", error);
     }
   };
 
@@ -723,6 +761,14 @@ export const Profile: React.FC<{
         >
           <LayoutDashboard size={20} />
         </button>
+        {isOwnProfile && (
+          <button 
+            onClick={() => setActiveTab('wallet')}
+            className={`flex-1 py-3 flex justify-center border-b-2 transition-colors ${activeTab === 'wallet' ? 'border-white text-white' : 'border-transparent text-zinc-500'}`}
+          >
+            <Wallet size={20} />
+          </button>
+        )}
       </div>
 
       {/* Tab Content */}
@@ -857,6 +903,127 @@ export const Profile: React.FC<{
                   </div>
                 </div>
               ))
+            )}
+          </div>
+        )}
+
+        {activeTab === 'wallet' && isOwnProfile && (
+          <div className="p-4 space-y-6 animate-in fade-in slide-in-from-bottom-4">
+            {/* Wallet Balance Card */}
+            <div className="bg-gradient-to-br from-zinc-900 to-black border border-white/10 p-8 rounded-[40px] relative overflow-hidden shadow-2xl">
+              <div className="absolute top-0 right-0 p-8 opacity-10">
+                <Wallet size={120} />
+              </div>
+              <div className="relative z-10">
+                <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em] mb-2">Available Balance</p>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-5xl font-black text-white tracking-tighter">₹{formatNumber(user.walletBalance)}</span>
+                  <span className="text-zinc-500 text-sm font-bold">INR</span>
+                </div>
+                
+                <div className="mt-8 flex space-x-3">
+                  <button 
+                    onClick={() => setShowWithdrawModal(true)}
+                    className="flex-1 bg-white text-black py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-white/5"
+                  >
+                    Withdraw Funds
+                  </button>
+                  <button 
+                    onClick={() => setShowSuperChatModal(true)}
+                    className="flex-1 bg-zinc-800 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-zinc-700 transition-all border border-white/5"
+                  >
+                    Add Credits
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Transaction History */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between px-2">
+                <h3 className="text-xs font-black text-zinc-500 uppercase tracking-widest">Transaction History</h3>
+                <button className="text-[10px] font-bold text-rose-500 hover:underline">View All</button>
+              </div>
+
+              <div className="space-y-2">
+                {walletTransactions.length === 0 ? (
+                  <div className="bg-zinc-900/50 border border-dashed border-zinc-800 p-12 rounded-[32px] text-center">
+                    <Clock className="mx-auto text-zinc-800 mb-3 opacity-20" size={32} />
+                    <p className="text-zinc-600 font-bold uppercase tracking-widest text-[10px]">No transactions yet</p>
+                  </div>
+                ) : (
+                  walletTransactions.map(tx => (
+                    <div key={tx.id} className="bg-zinc-900/80 backdrop-blur-md border border-white/5 p-4 rounded-3xl flex items-center justify-between group hover:border-white/10 transition-all">
+                      <div className="flex items-center space-x-4">
+                        <div className={cn(
+                          "w-12 h-12 rounded-2xl flex items-center justify-center transition-all",
+                          tx.type === 'earning' ? "bg-emerald-500/10 text-emerald-500" :
+                          tx.type === 'withdrawal' ? "bg-rose-500/10 text-rose-500" :
+                          "bg-blue-500/10 text-blue-500"
+                        )}>
+                          {tx.type === 'earning' ? <Sparkles size={20} /> : 
+                           tx.type === 'withdrawal' ? <Landmark size={20} /> : 
+                           <IndianRupee size={20} />}
+                        </div>
+                        <div>
+                          <p className="font-black text-white text-sm tracking-tight">{tx.description}</p>
+                          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-0.5">
+                            {format(tx.createdAt, 'MMM dd, yyyy')} • {tx.source.replace('_', ' ')}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className={cn(
+                          "font-black text-lg tracking-tighter",
+                          tx.type === 'earning' ? "text-emerald-500" : "text-white"
+                        )}>
+                          {tx.type === 'earning' ? '+' : '-'}₹{tx.amount}
+                        </p>
+                        <span className={cn(
+                          "text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border",
+                          tx.status === 'completed' ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" :
+                          tx.status === 'pending' ? "bg-amber-500/10 text-amber-500 border-amber-500/20" :
+                          "bg-rose-500/10 text-rose-500 border-rose-500/20"
+                        )}>
+                          {tx.status}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Withdrawal Requests Status */}
+            {withdrawalRequests.length > 0 && (
+              <div className="space-y-4">
+                <h3 className="text-xs font-black text-zinc-500 uppercase tracking-widest px-2">Withdrawal Requests</h3>
+                <div className="space-y-2">
+                  {withdrawalRequests.map(req => (
+                    <div key={req.id} className="bg-zinc-900/50 border border-white/5 p-4 rounded-3xl flex items-center justify-between">
+                      <div className="flex items-center space-x-4">
+                        <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-500">
+                          <Landmark size={18} />
+                        </div>
+                        <div>
+                          <p className="font-bold text-white text-xs">₹{req.amount} Withdrawal</p>
+                          <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest">
+                            {format(req.createdAt, 'MMM dd')} • {req.bankDetails.bankName}
+                          </p>
+                        </div>
+                      </div>
+                      <span className={cn(
+                        "text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg",
+                        req.status === 'pending' ? "bg-amber-500/10 text-amber-500" :
+                        req.status === 'approved' ? "bg-emerald-500/10 text-emerald-500" :
+                        "bg-rose-500/10 text-rose-500"
+                      )}>
+                        {req.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -1487,57 +1654,15 @@ export const Profile: React.FC<{
 
       {/* Boost Modal */}
       <AnimatePresence>
-        {showBoostModal && (
-          <div className="fixed inset-0 z-[100] flex items-end justify-center">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowBoostModal(false)}
-              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              className="relative w-full max-w-md bg-zinc-900 rounded-t-3xl p-6 pb-10 border-t border-white/10"
-            >
-              <div className="w-12 h-1.5 bg-zinc-800 rounded-full mx-auto mb-6" />
-              <h3 className="text-xl font-bold mb-2">Boost Your Reach 🚀</h3>
-              <p className="text-zinc-400 text-sm mb-4">Get up to 10x more views and engagement with our premium boost plans.</p>
-              
-              {videoToBoost && (
-                <div className="bg-zinc-950 p-3 rounded-2xl border border-white/5 mb-6 flex items-center space-x-3">
-                  <div className="w-12 h-16 bg-zinc-800 rounded-lg overflow-hidden shrink-0">
-                    <img src={videoToBoost.thumbnailUrl} className="w-full h-full object-cover" alt="" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Boosting Video</p>
-                    <p className="text-xs font-bold text-white truncate">{videoToBoost.caption || 'No caption'}</p>
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-3">
-                {BOOST_PLANS.map(plan => (
-                  <button 
-                    key={plan.id}
-                    onClick={() => handleBoost(plan)}
-                    className="w-full bg-zinc-800 hover:bg-zinc-700 p-4 rounded-2xl flex items-center justify-between transition-colors border border-white/5"
-                  >
-                    <div className="text-left">
-                      <p className="font-bold">{plan.name}</p>
-                      <p className="text-xs text-zinc-500">Priority ranking for {plan.durationDays} days</p>
-                    </div>
-                    <div className="flex items-center space-x-1 bg-white text-black px-3 py-1.5 rounded-lg font-bold">
-                      <IndianRupee size={14} />
-                      <span>{plan.price}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </motion.div>
-          </div>
+        {showBoostModal && videoToBoost && user && (
+          <BoostModal 
+            currentUser={user}
+            video={videoToBoost}
+            onClose={() => {
+              setShowBoostModal(false);
+              setVideoToBoost(null);
+            }}
+          />
         )}
       </AnimatePresence>
       {/* Monetization Modal */}
@@ -1748,6 +1873,126 @@ export const Profile: React.FC<{
                   onNavigate?.(uid);
                 }}
               />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* Withdrawal Modal */}
+      <AnimatePresence>
+        {showWithdrawModal && user && (
+          <div className="fixed inset-0 z-[160] flex items-end justify-center">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowWithdrawModal(false)}
+              className="absolute inset-0 bg-black/90 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              className="relative w-full max-w-md bg-zinc-950 rounded-t-[40px] p-8 pb-12 border-t border-white/10 shadow-2xl"
+            >
+              <div className="w-12 h-1.5 bg-zinc-800 rounded-full mx-auto mb-8" />
+              
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center space-x-4">
+                  <div className="w-12 h-12 bg-emerald-500/20 rounded-2xl flex items-center justify-center border border-emerald-500/30">
+                    <Landmark size={24} className="text-emerald-500" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black">Withdraw Funds</h3>
+                    <p className="text-zinc-500 text-xs font-bold uppercase tracking-wider">Transfer to Bank Account</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowWithdrawModal(false)}
+                  className="w-10 h-10 bg-zinc-900 rounded-full flex items-center justify-center text-zinc-500 hover:text-white transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                <div className="bg-zinc-900/50 border border-white/5 p-6 rounded-3xl">
+                  <p className="text-[10px] text-zinc-500 font-black uppercase tracking-[0.2em] mb-4">Withdrawal Amount</p>
+                  <div className="flex items-center space-x-3">
+                    <span className="text-4xl font-black text-white">₹</span>
+                    <input 
+                      type="number"
+                      placeholder="0.00"
+                      value={withdrawAmount}
+                      onChange={(e) => setWithdrawAmount(e.target.value)}
+                      className="bg-transparent text-4xl font-black text-white focus:outline-none w-full tracking-tighter"
+                    />
+                  </div>
+                  <div className="mt-4 flex items-center justify-between">
+                    <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Available: ₹{user.walletBalance}</p>
+                    <button 
+                      onClick={() => setWithdrawAmount(user.walletBalance.toString())}
+                      className="text-[10px] font-black text-emerald-500 uppercase tracking-widest hover:underline"
+                    >
+                      Withdraw All
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900/30 border border-zinc-800/50 p-6 rounded-3xl space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">Bank Account</p>
+                    <button 
+                      onClick={() => {
+                        setShowWithdrawModal(false);
+                        setShowEditModal(true);
+                      }}
+                      className="text-[10px] font-black text-zinc-400 uppercase tracking-widest hover:text-white transition-colors"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                  {user.bankAccountNumber ? (
+                    <div className="flex items-center space-x-4">
+                      <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-400">
+                        <Landmark size={20} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-black text-white">{user.bankName || 'Bank Account'}</p>
+                        <p className="text-[10px] text-zinc-500 font-bold tracking-widest">
+                          •••• {user.bankAccountNumber.slice(-4)} • {user.accountHolderName}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-4 space-y-2">
+                      <AlertCircle className="text-amber-500" size={24} />
+                      <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest text-center">
+                        Bank details missing. Please update in profile settings.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl flex items-start space-x-3">
+                  <AlertCircle size={16} className="text-amber-500 mt-0.5 shrink-0" />
+                  <p className="text-[10px] text-amber-500/80 font-medium leading-relaxed">
+                    Withdrawals are processed within 3-5 business days. Minimum withdrawal amount is ₹100.
+                  </p>
+                </div>
+
+                <button 
+                  onClick={handleWithdraw}
+                  disabled={isWithdrawing || !withdrawAmount || parseFloat(withdrawAmount) < 100}
+                  className="w-full bg-emerald-500 text-white py-5 rounded-2xl font-black text-lg flex items-center justify-center space-x-3 hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-emerald-500/20 disabled:opacity-50 disabled:grayscale disabled:hover:scale-100"
+                >
+                  {isWithdrawing ? <Loader2 className="animate-spin" /> : (
+                    <>
+                      <span>Confirm Withdrawal</span>
+                      <Rocket size={20} />
+                    </>
+                  )}
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

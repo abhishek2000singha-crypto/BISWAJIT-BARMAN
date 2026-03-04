@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Home, Search, PlusSquare, Heart, User as UserIcon, LayoutDashboard, Loader2, CloudUpload, CheckCircle2, AlertCircle, X, MessageSquare } from 'lucide-react';
+import { Home, Search, PlusSquare, Heart, User as UserIcon, LayoutDashboard, Loader2, CloudUpload, CheckCircle2, AlertCircle, X, MessageSquare, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth, db } from './services/firebase';
-import { onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
+import { onSnapshot, doc, getDoc, setDoc, collection, query, where } from 'firebase/firestore';
 import { Feed } from './components/Feed';
 import { Profile } from './components/Profile';
 import { Upload } from './components/Upload';
@@ -11,12 +11,13 @@ import { AdminPanel } from './components/AdminPanel';
 import { Auth } from './components/Auth';
 import { Chat } from './components/Chat';
 import { Discover } from './components/Discover';
+import { Notifications } from './components/Notifications';
 import { useUpload } from './contexts/UploadContext';
 import { cn } from './utils';
 
 export default function App() {
   const { uploads, removeUpload } = useUpload();
-  const [activeTab, setActiveTab] = useState<'home' | 'discover' | 'upload' | 'profile' | 'admin' | 'messages'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'discover' | 'upload' | 'profile' | 'admin' | 'messages' | 'notifications'>('home');
   const [viewingProfileId, setViewingProfileId] = useState<string | null>(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [user, setUser] = useState<any>(null);
@@ -24,6 +25,7 @@ export default function App() {
   const [preSelectedChatUserId, setPreSelectedChatUserId] = useState<string | null>(null);
   const [initialVideoId, setInitialVideoId] = useState<string | null>(null);
   const [isDraggingGlobal, setIsDraggingGlobal] = useState(false);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
 
   useEffect(() => {
     const handleDragOver = (e: DragEvent) => {
@@ -66,6 +68,7 @@ export default function App() {
 
   useEffect(() => {
     let unsubscribeSnapshot: () => void;
+    let unsubscribeNotifications: () => void;
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
@@ -107,9 +110,20 @@ export default function App() {
             setUser(doc.data());
           }
         });
+
+        // Notifications listener
+        const q = query(
+          collection(db, 'notifications'),
+          where('userId', '==', firebaseUser.uid),
+          where('read', '==', false)
+        );
+        unsubscribeNotifications = onSnapshot(q, (snapshot) => {
+          setUnreadNotificationsCount(snapshot.size);
+        });
       } else {
         setUser(null);
         if (unsubscribeSnapshot) unsubscribeSnapshot();
+        if (unsubscribeNotifications) unsubscribeNotifications();
       }
       setInitializing(false);
     });
@@ -117,6 +131,7 @@ export default function App() {
     return () => {
       unsubscribeAuth();
       if (unsubscribeSnapshot) unsubscribeSnapshot();
+      if (unsubscribeNotifications) unsubscribeNotifications();
     };
   }, []);
 
@@ -185,6 +200,19 @@ export default function App() {
       );
       case 'admin': return <AdminPanel currentUser={user} onLogout={handleLogout} />;
       case 'messages': return <Chat currentUser={user} preSelectedUserId={preSelectedChatUserId || undefined} />;
+      case 'notifications': return (
+        <Notifications 
+          userId={user.uid} 
+          onUserClick={(uid) => {
+            setViewingProfileId(uid);
+            setActiveTab('profile');
+          }}
+          onVideoClick={(videoId) => {
+            setInitialVideoId(videoId);
+            setActiveTab('home');
+          }}
+        />
+      );
       default: return <Feed onUserClick={(uid) => {
         setViewingProfileId(uid);
         setActiveTab('profile');
@@ -353,6 +381,13 @@ export default function App() {
           active={activeTab === 'messages'} 
           onClick={() => setActiveTab('messages')} 
         />
+        <NavButton 
+          icon={<Bell size={24} />} 
+          label="Inbox" 
+          active={activeTab === 'notifications'} 
+          onClick={() => setActiveTab('notifications')} 
+          badge={unreadNotificationsCount > 0 ? unreadNotificationsCount : undefined}
+        />
         <button 
           onClick={() => setActiveTab('upload')}
           className="flex flex-col items-center justify-center -mt-4"
@@ -380,13 +415,18 @@ export default function App() {
   );
 }
 
-function NavButton({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) {
+function NavButton({ icon, label, active, onClick, badge }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void, badge?: number }) {
   return (
     <button 
       onClick={onClick}
-      className={`flex flex-col items-center justify-center space-y-1 transition-colors ${active ? 'text-white' : 'text-zinc-500'}`}
+      className={`flex flex-col items-center justify-center space-y-1 transition-colors relative ${active ? 'text-white' : 'text-zinc-500'}`}
     >
       {icon}
+      {badge !== undefined && (
+        <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-black">
+          {badge > 9 ? '9+' : badge}
+        </span>
+      )}
       <span className="text-[10px] font-medium">{label}</span>
       {active && (
         <motion.div 

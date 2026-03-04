@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Gift, IndianRupee, Send, Loader2, CreditCard, Wallet, Sparkles, ArrowRight } from 'lucide-react';
-import { doc, updateDoc, increment, addDoc, collection } from 'firebase/firestore';
+import { doc, updateDoc, increment, addDoc, collection, getDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
-import { User } from '../types';
+import { User, Video } from '../types';
+import { sendNotification } from '../services/notificationService';
 
 interface SuperChatModalProps {
   currentUser: User;
@@ -35,6 +36,18 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
       await updateDoc(userRef, {
         superChatBalance: increment(selectedPack.amount)
       });
+
+      // Record transaction
+      await addDoc(collection(db, 'transactions'), {
+        userId: currentUser.uid,
+        type: 'purchase',
+        amount: selectedPack.amount,
+        description: `Purchased ${selectedPack.label}`,
+        status: 'completed',
+        source: 'wallet_topup',
+        createdAt: Date.now()
+      });
+
       alert(`Successfully added ₹${selectedPack.amount} to your Super Chat Wallet!`);
       onClose();
     } catch (error) {
@@ -78,6 +91,49 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
         amount: giftAmount,
         message: giftMessage,
         createdAt: Date.now()
+      });
+
+      // Record earning transaction for receiver
+      await addDoc(collection(db, 'transactions'), {
+        userId: targetUser.uid,
+        type: 'earning',
+        amount: giftAmount,
+        description: `Received Super Chat from ${currentUser.name}`,
+        status: 'completed',
+        source: 'super_chat',
+        createdAt: Date.now()
+      });
+
+      // Record spending transaction for sender
+      await addDoc(collection(db, 'transactions'), {
+        userId: currentUser.uid,
+        type: 'purchase',
+        amount: giftAmount,
+        description: `Sent Super Chat to ${targetUser.name}`,
+        status: 'completed',
+        source: 'super_chat',
+        createdAt: Date.now()
+      });
+
+      // 4. Send notification
+      let videoThumbnail: string | undefined;
+      if (videoId) {
+        const videoSnap = await getDoc(doc(db, 'videos', videoId));
+        if (videoSnap.exists()) {
+          const videoData = videoSnap.data() as Video;
+          videoThumbnail = videoData.thumbnailUrl || videoData.videoUrl;
+        }
+      }
+
+      sendNotification({
+        userId: targetUser.uid,
+        senderId: currentUser.uid,
+        senderName: currentUser.name,
+        senderProfileImage: currentUser.profileImage,
+        type: 'monetization',
+        videoId: videoId,
+        videoThumbnail: videoThumbnail,
+        message: `sent you a ₹${giftAmount} Super Chat! ${giftMessage ? `"${giftMessage}"` : ''}`
       });
 
       alert(`Successfully sent ₹${giftAmount} Super Chat to ${targetUser.name}!`);

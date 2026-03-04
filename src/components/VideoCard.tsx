@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Heart, MessageCircle, Share2, Music2, UserPlus, CheckCircle2, Check, Eye, X, Sparkles, Play, Pause, Volume2, VolumeX, Loader2 } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Music2, UserPlus, CheckCircle2, Check, Eye, X, Sparkles, Play, Pause, Volume2, VolumeX, Loader2, Rocket } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { doc, getDoc, setDoc, deleteDoc, updateDoc, increment, writeBatch, query, collection, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
@@ -8,7 +8,9 @@ import { formatNumber, formatDuration } from '../utils';
 import { Comments } from './Comments';
 import { formatDistanceToNow } from 'date-fns';
 import { SuperChatModal } from './SuperChatModal';
+import { BoostModal } from './BoostModal';
 import confetti from 'canvas-confetti';
+import { sendNotification } from '../services/notificationService';
 
 interface VideoCardProps {
   video: Video;
@@ -26,6 +28,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
   const [isFollowLoading, setIsFollowLoading] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [showSuperChat, setShowSuperChat] = useState(false);
+  const [showBoostModal, setShowBoostModal] = useState(false);
   const [videoCreator, setVideoCreator] = useState<User | null>(null);
   const [recentSuperChat, setRecentSuperChat] = useState<any>(null);
   const [isPlaying, setIsPlaying] = useState(true);
@@ -199,6 +202,18 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
         batch.update(creatorRef, { followersCount: increment(1) });
         batch.update(currentUserRef, { followingCount: increment(1) });
         setIsFollowing(true);
+
+        // Send notification
+        if (currentUser) {
+          sendNotification({
+            userId: video.userId,
+            senderId: currentUser.uid,
+            senderName: currentUser.name,
+            senderProfileImage: currentUser.profileImage,
+            type: 'follow',
+            message: 'started following you'
+          });
+        }
       }
 
       await batch.commit();
@@ -239,6 +254,20 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
         setIsLiked(true);
         setShowHeartAnim(true);
         setTimeout(() => setShowHeartAnim(false), 1000);
+
+        // Send notification
+        if (currentUser && currentUser.uid !== video.userId) {
+          sendNotification({
+            userId: video.userId,
+            senderId: currentUser.uid,
+            senderName: currentUser.name,
+            senderProfileImage: currentUser.profileImage,
+            type: 'like',
+            videoId: video.id,
+            videoThumbnail: video.thumbnailUrl || video.videoUrl,
+            message: 'liked your post'
+          });
+        }
       }
       await batch.commit();
     } catch (error) {
@@ -429,14 +458,14 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
             </button>
 
             <button 
-              onClick={(e) => { e.stopPropagation(); setShowSuperChat(true); }}
-              aria-label="Send Gift"
+              onClick={(e) => { e.stopPropagation(); setShowBoostModal(true); }}
+              aria-label="Boost Reel"
               className="flex flex-col items-center"
             >
-              <div className="w-10 h-10 bg-gradient-to-tr from-purple-600 to-pink-500 rounded-full flex items-center justify-center shadow-lg shadow-purple-500/40">
-                <Music2 size={20} className="text-white" />
+              <div className="w-10 h-10 bg-gradient-to-tr from-rose-600 to-orange-500 rounded-full flex items-center justify-center shadow-lg shadow-rose-500/40">
+                <Rocket size={20} className="text-white" />
               </div>
-              <span className="text-purple-400 text-[10px] font-black mt-1 uppercase tracking-tighter">Gift</span>
+              <span className="text-rose-400 text-[10px] font-black mt-1 uppercase tracking-tighter">Boost</span>
             </button>
           </div>
         )}
@@ -574,6 +603,17 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
             targetUser={videoCreator}
             videoId={video.id}
             onClose={() => setShowSuperChat(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Boost Modal */}
+      <AnimatePresence>
+        {showBoostModal && currentUser && (
+          <BoostModal 
+            currentUser={currentUser}
+            video={video}
+            onClose={() => setShowBoostModal(false)}
           />
         )}
       </AnimatePresence>

@@ -131,3 +131,44 @@ export interface AdminTask {
   createdAt: number;
   updatedAt: number;
 }
+
+export interface Notification {
+  id: string;
+  userId: string; // The user who receives the notification
+  senderId: string; // The user who triggered the notification
+  senderName: string;
+  senderProfileImage: string;
+  type: 'like' | 'comment' | 'follow' | 'monetization' | 'system';
+  videoId?: string;
+  videoThumbnail?: string;
+  message: string;
+  read: boolean;
+  createdAt: number;
+}
+
+export interface Transaction {
+  id: string;
+  userId: string;
+  type: 'earning' | 'withdrawal' | 'purchase' | 'transfer';
+  amount: number;
+  description: string;
+  status: 'completed' | 'pending' | 'failed';
+  source: 'super_chat' | 'boost_share' | 'wallet_topup' | 'admin_transfer';
+  createdAt: number;
+}
+
+export interface WithdrawalRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  amount: number;
+  status: 'pending' | 'approved' | 'rejected';
+  bankDetails: {
+    accountNumber: string;
+    ifscCode: string;
+    accountHolderName: string;
+    bankName: string;
+  };
+  createdAt: number;
+  processedAt?: number;
+}

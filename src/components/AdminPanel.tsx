@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useUpload } from '../contexts/UploadContext';
 import { cn } from '../utils';
+import { sendNotification } from '../services/notificationService';
 import { 
   AreaChart, 
   Area, 
@@ -185,6 +186,18 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
     try {
       const userRef = doc(db, 'users', userId);
       await updateDoc(userRef, { monetizationStatus: status });
+
+      // Send notification
+      sendNotification({
+        userId: userId,
+        senderId: currentUser.uid,
+        senderName: 'System',
+        senderProfileImage: 'https://api.dicebear.com/7.x/avataaars/svg?seed=admin',
+        type: 'monetization',
+        message: status === 'approved' 
+          ? 'Congratulations! Your monetization request has been approved. You can now earn from your content.' 
+          : 'Your monetization request has been rejected. Please review our policies and try again.'
+      });
     } catch (error) {
       console.error(error);
       alert("Failed to update status.");
@@ -201,6 +214,16 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
       pendingUsers.forEach(user => {
         const userRef = doc(db, 'users', user.uid);
         batch.update(userRef, { monetizationStatus: 'approved' });
+
+        // Send notification
+        sendNotification({
+          userId: user.uid,
+          senderId: currentUser.uid,
+          senderName: 'System',
+          senderProfileImage: 'https://api.dicebear.com/7.x/avataaars/svg?seed=admin',
+          type: 'monetization',
+          message: 'Congratulations! Your monetization request has been approved. You can now earn from your content.'
+        });
       });
       await batch.commit();
       alert(`Successfully approved ${pendingUsers.length} users!`);
@@ -333,35 +356,79 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
       const { userId, amount } = requestData;
 
       if (status === 'approved') {
-        const userRef = doc(db, 'users', userId);
-        const userSnap = await getDoc(userRef);
-        
-        if (!userSnap.exists()) {
-          alert("User not found");
-          return;
-        }
-
-        const userData = userSnap.data();
-        const currentBalance = userData.walletBalance || 0;
-
-        if (currentBalance < amount) {
-          alert("Insufficient user balance for this withdrawal");
-          return;
-        }
-
-        // Deduct from wallet using increment for safety
-        await updateDoc(userRef, {
-          walletBalance: increment(-amount)
+        await updateDoc(requestRef, { 
+          status: 'approved',
+          processedAt: Date.now()
         });
 
-        await updateDoc(requestRef, { status: 'approved' });
-        alert(`Withdrawal of ₹${amount} approved and deducted from user balance.`);
+        // Update transaction status
+        const txQuery = query(
+          collection(db, 'transactions'),
+          where('userId', '==', userId),
+          where('type', '==', 'withdrawal'),
+          where('amount', '==', amount),
+          where('status', '==', 'pending'),
+          orderBy('createdAt', 'desc')
+        );
+        const txSnap = await getDocs(txQuery);
+        if (!txSnap.empty) {
+          await updateDoc(doc(db, 'transactions', txSnap.docs[0].id), {
+            status: 'completed'
+          });
+        }
+
+        // Send notification
+        sendNotification({
+          userId: userId,
+          senderId: 'system',
+          senderName: 'System',
+          senderProfileImage: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png',
+          type: 'monetization',
+          message: `Your withdrawal request for ₹${amount} has been approved and processed.`
+        });
+
+        alert(`Withdrawal of ₹${amount} approved.`);
       } else {
+        // Refund the user if rejected
+        const userRef = doc(db, 'users', userId);
+        await updateDoc(userRef, {
+          walletBalance: increment(amount)
+        });
+
         await updateDoc(requestRef, { 
           status: 'rejected',
-          rejectionReason: reason || 'No reason provided'
+          rejectionReason: reason || 'No reason provided',
+          processedAt: Date.now()
         });
-        alert(`Withdrawal request rejected.`);
+
+        // Update transaction status
+        const txQuery = query(
+          collection(db, 'transactions'),
+          where('userId', '==', userId),
+          where('type', '==', 'withdrawal'),
+          where('amount', '==', amount),
+          where('status', '==', 'pending'),
+          orderBy('createdAt', 'desc')
+        );
+        const txSnap = await getDocs(txQuery);
+        if (!txSnap.empty) {
+          await updateDoc(doc(db, 'transactions', txSnap.docs[0].id), {
+            status: 'failed',
+            description: `Withdrawal Rejected: ${reason || 'No reason provided'}`
+          });
+        }
+
+        // Send notification
+        sendNotification({
+          userId: userId,
+          senderId: 'system',
+          senderName: 'System',
+          senderProfileImage: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png',
+          type: 'monetization',
+          message: `Your withdrawal request for ₹${amount} was rejected. Reason: ${reason || 'No reason provided'}. The amount has been refunded to your wallet.`
+        });
+
+        alert(`Withdrawal request rejected and refunded.`);
       }
       
       setShowRejectionModal(null);
