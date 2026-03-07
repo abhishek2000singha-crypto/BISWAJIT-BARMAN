@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { IndianRupee, Users, Eye, ShieldAlert, CheckCircle2, ArrowRight, Trophy, AlertTriangle, Building, CreditCard, Landmark, Loader2, Grid } from 'lucide-react';
 import { User } from '../types';
-import { doc, updateDoc, collection, addDoc } from 'firebase/firestore';
+import { doc, updateDoc, collection, addDoc, writeBatch, increment } from 'firebase/firestore';
 import { db } from '../services/firebase';
 
 interface MonetizationDashboardProps {
@@ -48,10 +48,11 @@ export const MonetizationDashboard: React.FC<MonetizationDashboardProps> = ({ us
 
     setIsWithdrawing(true);
     try {
-      const userRef = doc(db, 'users', user.uid);
+      const batch = writeBatch(db);
       
-      // Create withdrawal request
-      await addDoc(collection(db, 'withdrawal_requests'), {
+      // 1. Create withdrawal request
+      const requestRef = doc(collection(db, 'withdrawal_requests'));
+      batch.set(requestRef, {
         userId: user.uid,
         userName: user.name,
         amount: amount,
@@ -59,6 +60,26 @@ export const MonetizationDashboard: React.FC<MonetizationDashboardProps> = ({ us
         status: 'pending',
         createdAt: Date.now()
       });
+
+      // 2. Deduct from wallet balance
+      const userRef = doc(db, 'users', user.uid);
+      batch.update(userRef, {
+        walletBalance: increment(-amount)
+      });
+
+      // 3. Record transaction
+      const txRef = doc(collection(db, 'transactions'));
+      batch.set(txRef, {
+        userId: user.uid,
+        type: 'withdrawal',
+        amount: amount,
+        description: `Withdrawal Request (${bankDetails.payoutType})`,
+        status: 'pending',
+        source: 'wallet_topup',
+        createdAt: Date.now()
+      });
+
+      await batch.commit();
 
       alert(`Withdrawal request of ₹${amount} submitted successfully!`);
       setShowWithdrawForm(false);

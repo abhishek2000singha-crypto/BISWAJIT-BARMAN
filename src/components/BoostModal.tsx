@@ -25,6 +25,7 @@ export const BoostModal: React.FC<BoostModalProps> = ({ currentUser, video, onCl
       const isOwnVideo = currentUser.uid === video.userId;
       const boostAmount = selectedPlan.price;
       const creatorShare = isOwnVideo ? 0 : boostAmount * 0.5; // Creator gets 50% if someone else boosts
+      const platformFee = boostAmount - creatorShare;
 
       // 1. Record boost transaction
       await addDoc(collection(db, 'boost_transactions'), {
@@ -34,6 +35,8 @@ export const BoostModal: React.FC<BoostModalProps> = ({ currentUser, video, onCl
         planId: selectedPlan.id,
         planName: selectedPlan.name,
         amount: boostAmount,
+        creatorShare: creatorShare,
+        platformFee: platformFee,
         status: 'success',
         createdAt: Date.now(),
         expiryAt: Date.now() + (selectedPlan.durationDays * 86400000)

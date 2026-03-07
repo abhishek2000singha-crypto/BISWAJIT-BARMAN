@@ -203,13 +203,34 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           try {
             setUploads(prev => prev.map(u => u.id === id ? { ...u, stage: 'transcoding' } : u));
             const apiBase = import.meta.env.VITE_API_BASE_URL || '';
-            await fetch(`${apiBase}/api/videos/transcode`, {
+            
+            // On Netlify/Static hosting, there is no backend to handle transcoding.
+            // We'll try to trigger it, but if it fails (e.g. 404), we'll assume static hosting and set status to ready.
+            const response = await fetch(`${apiBase}/api/videos/transcode`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ videoId: id, videoUrl: currentJob.videoUrl })
-            });
+            }).catch(() => null);
+            
+            if (!response || !response.ok) {
+              console.warn("Transcoding trigger failed or backend unavailable. Setting status to ready for static hosting compatibility.");
+              const videoRef_fs = doc(db, 'videos', id);
+              await updateDoc(videoRef_fs, { 
+                status: 'ready',
+                updatedAt: Date.now()
+              });
+            }
           } catch (e) {
-            console.warn("Transcoding trigger failed, video might stay in processing", e);
+            console.warn("Transcoding trigger failed, video might stay in processing. Attempting fallback to ready status.", e);
+            try {
+              const videoRef_fs = doc(db, 'videos', id);
+              await updateDoc(videoRef_fs, { 
+                status: 'ready',
+                updatedAt: Date.now()
+              });
+            } catch (fallbackErr) {
+              console.error("Fallback to ready status failed:", fallbackErr);
+            }
           }
         }
 

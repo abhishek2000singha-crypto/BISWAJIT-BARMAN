@@ -68,6 +68,9 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
 
     setIsLoading(true);
     try {
+      const platformFee = giftAmount * 0.3;
+      const creatorShare = giftAmount - platformFee;
+
       const senderRef = doc(db, 'users', currentUser.uid);
       const receiverRef = doc(db, 'users', targetUser.uid);
 
@@ -76,9 +79,9 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
         superChatBalance: increment(-giftAmount)
       });
 
-      // 2. Add to receiver's wallet (earnings)
+      // 2. Add to receiver's wallet (earnings) - 70% share
       await updateDoc(receiverRef, {
-        walletBalance: increment(giftAmount)
+        walletBalance: increment(creatorShare)
       });
 
       // 3. Record transaction
@@ -89,6 +92,8 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
         receiverName: targetUser.name,
         videoId: videoId || null,
         amount: giftAmount,
+        creatorShare: creatorShare,
+        platformFee: platformFee,
         message: giftMessage,
         createdAt: Date.now()
       });
@@ -97,8 +102,8 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
       await addDoc(collection(db, 'transactions'), {
         userId: targetUser.uid,
         type: 'earning',
-        amount: giftAmount,
-        description: `Received Super Chat from ${currentUser.name}`,
+        amount: creatorShare,
+        description: `Received Super Chat from ${currentUser.name} (after 30% fee)`,
         status: 'completed',
         source: 'super_chat',
         createdAt: Date.now()

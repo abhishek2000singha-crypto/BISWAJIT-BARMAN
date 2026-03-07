@@ -235,8 +235,8 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
   useEffect(() => {
     if (transactions.length === 0 && superChats.length === 0) return;
 
-    const boostRev = transactions.reduce((acc, curr) => acc + (curr.amount || 0), 0);
-    const chatRev = superChats.reduce((acc, curr) => acc + ((curr.amount || 0) * 0.3), 0);
+    const boostRev = transactions.reduce((acc, curr) => acc + (curr.platformFee || curr.amount || 0), 0);
+    const chatRev = superChats.reduce((acc, curr) => acc + (curr.platformFee || (curr.amount || 0) * 0.3), 0);
     const totalRev = boostRev + chatRev;
 
     setPlatformRevenue(totalRev);
