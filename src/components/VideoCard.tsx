@@ -149,6 +149,23 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
     }
   }, [isActive, video.id, video.userId, video.type]);
 
+  useEffect(() => {
+    let watchInterval: any;
+    if (isActive && isPlaying && video.type === 'video') {
+      watchInterval = setInterval(async () => {
+        try {
+          const videoRef = doc(db, 'videos', video.id);
+          await updateDoc(videoRef, { totalWatchTime: increment(1) });
+        } catch (error) {
+          console.error("Error updating watch time:", error);
+        }
+      }, 1000);
+    }
+    return () => {
+      if (watchInterval) clearInterval(watchInterval);
+    };
+  }, [isActive, isPlaying, video.id, video.type]);
+
   const togglePlay = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (videoRef.current) {
@@ -487,16 +504,26 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
 
       {/* Bottom Info */}
       <div className="absolute bottom-4 left-4 right-16 z-10">
-        <div className="flex items-center space-x-3 mb-2">
-          <h3 
-            className="text-white font-bold text-base cursor-pointer hover:text-rose-400 transition-colors flex items-center"
+        <p className="text-white text-sm line-clamp-2 mb-3">{video.caption}</p>
+        
+        <div className="flex items-center space-x-3 mb-3">
+          <div 
+            className="flex items-center space-x-2 cursor-pointer group"
             onClick={(e) => { 
               e.stopPropagation(); 
               if (onUserClick) onUserClick(video.userId); 
             }}
           >
-            @{video.userName}
-          </h3>
+            <img 
+              src={video.userProfileImage} 
+              alt={video.userName} 
+              className="w-9 h-9 rounded-full object-cover border-2 border-white/20 group-hover:border-rose-500 transition-all" 
+            />
+            <h3 className="text-white font-bold text-base group-hover:text-rose-400 transition-colors">
+              @{video.userName}
+            </h3>
+          </div>
+          
           <div className="flex items-center space-x-2 text-white/60 text-[10px] font-bold">
             <span>•</span>
             <span>{formatDistanceToNow(video.createdAt)} ago</span>
@@ -509,6 +536,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
               </>
             )}
           </div>
+          
           {auth.currentUser?.uid !== video.userId && (
             <button 
               onClick={handleFollow}
@@ -534,7 +562,6 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
             </span>
           )}
         </div>
-        <p className="text-white text-sm line-clamp-2 mb-3">{video.caption}</p>
         <div className="flex items-center text-white text-sm">
           {video.type === 'video' && <Music2 size={14} className="mr-2 animate-spin-slow" />}
           <span className="truncate">

@@ -136,6 +136,21 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (user?.uid) {
+      const updateLastActive = async () => {
+        try {
+          await setDoc(doc(db, 'users', user.uid), { lastActive: Date.now() }, { merge: true });
+        } catch (e) {
+          console.error("Error updating lastActive:", e);
+        }
+      };
+      updateLastActive();
+      const interval = setInterval(updateLastActive, 5 * 60 * 1000); // Every 5 mins
+      return () => clearInterval(interval);
+    }
+  }, [user?.uid]);
+
+  useEffect(() => {
     if (activeTab !== 'profile') {
       setViewingProfileId(null);
     }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Video, TrendingUp, DollarSign, ShieldCheck, Ban, Trash2, CheckCircle, XCircle, Loader2, CreditCard, AlertTriangle, LogOut, Search, Landmark, ChevronDown, ChevronUp, Sparkles, Gift, IndianRupee, Wallet, Plus, ClipboardList, Clock, CheckCircle2, X, Calendar, CloudUpload, Rocket } from 'lucide-react';
+import { Users, Video, TrendingUp, DollarSign, ShieldCheck, Ban, Trash2, CheckCircle, XCircle, Loader2, CreditCard, AlertTriangle, LogOut, Search, Landmark, ChevronDown, ChevronUp, Sparkles, Gift, IndianRupee, Wallet, Plus, ClipboardList, Clock, CheckCircle2, X, Calendar, CloudUpload, Rocket, UserPlus, Activity, BarChart3, PieChart as PieChartIcon } from 'lucide-react';
 import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, orderBy, getDocs, writeBatch, getDoc, increment, addDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { User as UserType, Video as VideoType, BoostTransaction, AdminTask } from '../types';
@@ -18,7 +18,10 @@ import {
   ResponsiveContainer,
   BarChart,
   Bar,
-  Cell
+  Cell,
+  PieChart,
+  Pie,
+  Legend
 } from 'recharts';
 
 export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void }> = ({ currentUser, onLogout }) => {
@@ -56,16 +59,22 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
   const [videoSortOrder, setVideoSortOrder] = useState<'asc' | 'desc'>('desc');
   const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
   const [platformRevenue, setPlatformRevenue] = useState(0);
+  const [activeCreatorsCount, setActiveCreatorsCount] = useState(0);
+  const [totalPayouts, setTotalPayouts] = useState(0);
+  const [avgWatchTime, setAvgWatchTime] = useState(0);
 
   const [stats, setStats] = useState([
     { label: 'Total Users', value: '0', icon: <Users className="text-blue-500" />, trend: 'Live', color: 'blue' },
-    { label: 'Total Videos', value: '0', icon: <Video className="text-rose-500" />, trend: 'Live', color: 'rose' },
-    { label: 'Total Boosted', value: '0', icon: <TrendingUp className="text-amber-500" />, trend: 'Live', color: 'amber' },
-    { label: 'Platform Comm.', value: '₹0', icon: <DollarSign className="text-emerald-500" />, trend: 'Live', color: 'emerald' },
-    { label: 'Admin Wallet', value: '₹0', icon: <Wallet className="text-purple-500" />, trend: 'Live', color: 'purple' },
+    { label: 'Active Creators', value: '0', icon: <UserPlus className="text-rose-500" />, trend: '30d', color: 'rose' },
+    { label: 'Total Videos', value: '0', icon: <Video className="text-amber-500" />, trend: 'Live', color: 'amber' },
+    { label: 'Total Revenue', value: '₹0', icon: <DollarSign className="text-emerald-500" />, trend: 'Live', color: 'emerald' },
+    { label: 'Avg Watch Time', value: '0s', icon: <Clock className="text-purple-500" />, trend: 'Live', color: 'purple' },
   ]);
 
-  const [chartData, setChartData] = useState<any[]>([]);
+  const [revenueChartData, setRevenueChartData] = useState<any[]>([]);
+  const [uploadTrendData, setUploadTrendData] = useState<any[]>([]);
+  const [dauData, setDauData] = useState<any[]>([]);
+  const [earningsDistribution, setEarningsDistribution] = useState<any[]>([]);
 
   useEffect(() => {
     // Pending Monetization
@@ -83,6 +92,45 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
       setStats(prev => prev.map(s => 
         s.label === 'Total Users' ? { ...s, value: users.length.toLocaleString() } : s
       ));
+
+      // DAU Data (users active in last 24h)
+      const now = Date.now();
+      const last7Days: Record<string, number> = {};
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now - i * 24 * 60 * 60 * 1000);
+        last7Days[format(d, 'MMM dd')] = 0;
+      }
+
+      users.forEach(u => {
+        if (u.lastActive) {
+          const date = format(u.lastActive, 'MMM dd');
+          if (last7Days[date] !== undefined) {
+            last7Days[date]++;
+          }
+        }
+      });
+
+      setDauData(Object.entries(last7Days).map(([name, users]) => ({ name, users })));
+
+      // Earnings Distribution
+      const ranges = [
+        { name: '₹0-100', value: 0 },
+        { name: '₹100-500', value: 0 },
+        { name: '₹500-2k', value: 0 },
+        { name: '₹2k-10k', value: 0 },
+        { name: '₹10k+', value: 0 },
+      ];
+
+      users.forEach(u => {
+        const bal = (u.walletBalance || 0) + (u.superChatBalance || 0);
+        if (bal <= 100) ranges[0].value++;
+        else if (bal <= 500) ranges[1].value++;
+        else if (bal <= 2000) ranges[2].value++;
+        else if (bal <= 10000) ranges[3].value++;
+        else ranges[4].value++;
+      });
+
+      setEarningsDistribution(ranges.filter(r => r.value > 0));
     });
 
     // All Videos
@@ -90,9 +138,43 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
       const videos = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as VideoType));
       setAllVideos(videos);
       
-      setStats(prev => prev.map(s => 
-        s.label === 'Total Videos' ? { ...s, value: videos.length.toLocaleString() } : s
-      ));
+      const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const activeCreators = new Set(
+        videos
+          .filter(v => (v.createdAt || 0) > thirtyDaysAgo)
+          .map(v => v.userId)
+      );
+      const activeCount = activeCreators.size;
+      setActiveCreatorsCount(activeCount);
+
+      // Avg Watch Time
+      const totalWatch = videos.reduce((acc, v) => acc + (v.totalWatchTime || 0), 0);
+      const avg = videos.length > 0 ? totalWatch / videos.length : 0;
+      setAvgWatchTime(avg);
+
+      // Upload Trends
+      const last7Days: Record<string, number> = {};
+      const now = Date.now();
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now - i * 24 * 60 * 60 * 1000);
+        last7Days[format(d, 'MMM dd')] = 0;
+      }
+
+      videos.forEach(v => {
+        const date = format(v.createdAt, 'MMM dd');
+        if (last7Days[date] !== undefined) {
+          last7Days[date]++;
+        }
+      });
+
+      setUploadTrendData(Object.entries(last7Days).map(([name, uploads]) => ({ name, uploads })));
+
+      setStats(prev => prev.map(s => {
+        if (s.label === 'Total Videos') return { ...s, value: videos.length.toLocaleString() };
+        if (s.label === 'Active Creators') return { ...s, value: activeCount.toLocaleString() };
+        if (s.label === 'Avg Watch Time') return { ...s, value: `${Math.round(avg)}s` };
+        return s;
+      }));
     });
 
     // Transactions
@@ -117,7 +199,17 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
     // Withdrawal Requests
     const qWithdrawals = query(collection(db, 'withdrawal_requests'), orderBy('createdAt', 'desc'));
     const unsubWithdrawals = onSnapshot(qWithdrawals, (snapshot) => {
-      setWithdrawalRequests(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
+      const requests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      setWithdrawalRequests(requests);
+      
+      const completedPayouts = requests
+        .filter((r: any) => r.status === 'approved')
+        .reduce((acc: number, curr: any) => acc + (curr.amount || 0), 0);
+      setTotalPayouts(completedPayouts);
+      
+      setStats(prev => prev.map(s => 
+        s.label === 'Total Payouts' ? { ...s, value: `₹${completedPayouts.toLocaleString()}` } : s
+      ));
     });
 
     // Tasks
@@ -156,23 +248,30 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
 
     // Process chart data (grouped by date)
     const dailyData: Record<string, number> = {};
+    const now = Date.now();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now - i * 24 * 60 * 60 * 1000);
+      dailyData[format(d, 'MMM dd')] = 0;
+    }
     
     transactions.forEach(tx => {
       const date = format(tx.createdAt, 'MMM dd');
-      dailyData[date] = (dailyData[date] || 0) + (tx.amount || 0);
+      if (dailyData[date] !== undefined) {
+        dailyData[date] = (dailyData[date] || 0) + (tx.amount || 0);
+      }
     });
 
     superChats.forEach(tx => {
       const date = format(tx.createdAt, 'MMM dd');
-      dailyData[date] = (dailyData[date] || 0) + ((tx.amount || 0) * 0.3);
+      if (dailyData[date] !== undefined) {
+        dailyData[date] = (dailyData[date] || 0) + ((tx.amount || 0) * 0.3);
+      }
     });
 
     const formattedData = Object.entries(dailyData)
-      .map(([name, revenue]) => ({ name, revenue }))
-      .sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime())
-      .slice(-7);
+      .map(([name, revenue]) => ({ name, revenue }));
     
-    setChartData(formattedData);
+    setRevenueChartData(formattedData);
   }, [transactions, superChats]);
 
   useEffect(() => {
@@ -1406,7 +1505,27 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
 
       {activeTab === 'withdrawals' && (
         <div className="space-y-4">
-          <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Withdrawal Requests</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Withdrawal Requests</h3>
+            <div className="flex items-center space-x-2">
+              <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Total Payouts: ₹{totalPayouts.toLocaleString()}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
+              <p className="text-[10px] text-zinc-500 uppercase font-bold mb-1">Total Requested</p>
+              <p className="text-lg font-black">₹{withdrawalRequests.reduce((acc, r) => acc + (r.amount || 0), 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
+              <p className="text-[10px] text-emerald-500 uppercase font-bold mb-1">Total Paid</p>
+              <p className="text-lg font-black text-emerald-500">₹{totalPayouts.toLocaleString()}</p>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
+              <p className="text-[10px] text-amber-500 uppercase font-bold mb-1">Pending Payouts</p>
+              <p className="text-lg font-black text-amber-500">₹{withdrawalRequests.filter(r => r.status === 'pending').reduce((acc, r) => acc + (r.amount || 0), 0).toLocaleString()}</p>
+            </div>
+          </div>
           {withdrawalRequests.length === 0 ? (
             <div className="bg-zinc-900/50 border border-dashed border-zinc-800 p-10 rounded-[32px] text-center">
               <Landmark className="mx-auto text-zinc-700 mb-3" size={40} />
@@ -1583,67 +1702,150 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
 
       {activeTab === 'stats' && (
         <div className="space-y-6">
-          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-[32px]">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-lg font-bold">Revenue Analytics</h3>
-                <p className="text-zinc-500 text-xs">Platform commission from video boosts</p>
+          {/* Revenue & DAU Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-[32px]">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center space-x-2">
+                    <DollarSign size={18} className="text-emerald-500" />
+                    <span>Revenue Analytics</span>
+                  </h3>
+                  <p className="text-zinc-500 text-xs">Platform commission & boosts (Last 7 Days)</p>
+                </div>
               </div>
-              <div className="flex items-center space-x-2 bg-zinc-950 p-1 rounded-lg border border-white/5">
-                <button className="px-3 py-1 text-[10px] font-bold bg-rose-500 text-white rounded-md">7D</button>
-                <button className="px-3 py-1 text-[10px] font-bold text-zinc-500">30D</button>
+              
+              <div className="h-[250px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={revenueChartData}>
+                    <defs>
+                      <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                    <XAxis dataKey="name" stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} dy={10} />
+                    <YAxis stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(value) => `₹${value}`} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '12px' }}
+                      itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
+                    />
+                    <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)" />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
             </div>
-            
-            <div className="h-[300px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData}>
-                  <defs>
-                    <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#F43F5E" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#F43F5E" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                  <XAxis 
-                    dataKey="name" 
-                    stroke="#71717a" 
-                    fontSize={10} 
-                    tickLine={false} 
-                    axisLine={false}
-                    dy={10}
-                  />
-                  <YAxis 
-                    stroke="#71717a" 
-                    fontSize={10} 
-                    tickLine={false} 
-                    axisLine={false}
-                    tickFormatter={(value) => `₹${value}`}
-                  />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '12px' }}
-                    itemStyle={{ color: '#F43F5E', fontWeight: 'bold' }}
-                  />
-                  <Area 
-                    type="monotone" 
-                    dataKey="revenue" 
-                    stroke="#F43F5E" 
-                    strokeWidth={3}
-                    fillOpacity={1} 
-                    fill="url(#colorRevenue)" 
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+
+            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-[32px]">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center space-x-2">
+                    <Activity size={18} className="text-blue-500" />
+                    <span>Daily Active Users</span>
+                  </h3>
+                  <p className="text-zinc-500 text-xs">User activity trends (Last 7 Days)</p>
+                </div>
+              </div>
+              
+              <div className="h-[250px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={dauData}>
+                    <defs>
+                      <linearGradient id="colorDau" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                    <XAxis dataKey="name" stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} dy={10} />
+                    <YAxis stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '12px' }}
+                      itemStyle={{ color: '#3b82f6', fontWeight: 'bold' }}
+                    />
+                    <Area type="monotone" dataKey="users" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorDau)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </div>
 
+          {/* Upload Trends & Earnings Distribution Row */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-[32px]">
-              <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-4">User Distribution</h3>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center space-x-2">
+                    <BarChart3 size={18} className="text-rose-500" />
+                    <span>Video Upload Trends</span>
+                  </h3>
+                  <p className="text-zinc-500 text-xs">New content per day (Last 7 Days)</p>
+                </div>
+              </div>
+              
+              <div className="h-[250px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={uploadTrendData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                    <XAxis dataKey="name" stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} dy={10} />
+                    <YAxis stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} />
+                    <Tooltip 
+                      cursor={{ fill: 'transparent' }}
+                      contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '12px' }}
+                      itemStyle={{ color: '#f43f5e', fontWeight: 'bold' }}
+                    />
+                    <Bar dataKey="uploads" fill="#f43f5e" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-[32px]">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center space-x-2">
+                    <PieChartIcon size={18} className="text-amber-500" />
+                    <span>Creator Earnings Distribution</span>
+                  </h3>
+                  <p className="text-zinc-500 text-xs">Wallet balance breakdown across users</p>
+                </div>
+              </div>
+              
+              <div className="h-[250px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={earningsDistribution}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={80}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {earningsDistribution.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={['#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#f43f5e'][index % 5]} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '12px' }}
+                    />
+                    <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+
+          {/* User Distribution & Recent Actions */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-[32px]">
+              <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-4">Monetization Status</h3>
               <div className="h-[200px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={[
-                    { name: 'Creators', value: allUsers.filter(u => u.monetizationStatus === 'approved').length },
+                    { name: 'Approved', value: allUsers.filter(u => u.monetizationStatus === 'approved').length },
                     { name: 'Regular', value: allUsers.filter(u => u.monetizationStatus !== 'approved').length },
                     { name: 'Pending', value: pendingUsers.length }
                   ]}>

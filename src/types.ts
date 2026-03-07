@@ -29,6 +29,7 @@ export interface User {
     twitter?: string;
     youtube?: string;
   };
+  lastActive?: number;
   createdAt: number;
 }
 
@@ -59,6 +60,7 @@ export interface Video {
   boosted: boolean;
   boostExpiry: number | null;
   duration?: number;
+  totalWatchTime?: number;
   audioTrack?: AudioTrack;
   status?: 'processing' | 'ready' | 'failed';
   adaptiveStreaming?: boolean;
