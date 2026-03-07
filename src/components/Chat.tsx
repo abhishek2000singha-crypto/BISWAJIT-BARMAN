@@ -43,7 +43,8 @@ export const Chat: React.FC<{ currentUser: User, onBack?: () => void, preSelecte
     });
 
     // Initialize Socket
-    const newSocket = io(window.location.origin);
+    const socketUrl = import.meta.env.VITE_SOCKET_URL || window.location.origin;
+    const newSocket = io(socketUrl);
     setSocket(newSocket);
 
     if (preSelectedUserId) {

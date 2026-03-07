@@ -202,7 +202,8 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (currentJob.type === 'video') {
           try {
             setUploads(prev => prev.map(u => u.id === id ? { ...u, stage: 'transcoding' } : u));
-            await fetch('/api/videos/transcode', {
+            const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+            await fetch(`${apiBase}/api/videos/transcode`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ videoId: id, videoUrl: currentJob.videoUrl })
