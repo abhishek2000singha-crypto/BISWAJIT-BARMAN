@@ -7,7 +7,34 @@
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div style="display: flex; align-items: center; justify-content: center; height: 100vh; background: black; color: white; font-family: sans-serif;">
+        <div style="text-align: center;">
+          <div id="loading-spinner" style="width: 40px; height: 40px; border: 3px solid #f43f5e; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px;"></div>
+          <p id="loading-text" style="opacity: 0.5; font-size: 14px;">Loading REELS KING...</p>
+        </div>
+      </div>
+    </div>
+    <style>
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+    <script>
+      // Early error tracking
+      window.onerror = function(message, source, lineno, colno, error) {
+        console.error("Critical Load Error:", message, error);
+        const root = document.getElementById('root');
+        if (root) {
+          root.innerHTML = '<div style="padding: 40px; color: white; background: #000; font-family: sans-serif; height: 100vh;">' +
+            '<h1 style="color: #f43f5e; margin-bottom: 10px;">App Load Error</h1>' +
+            '<p style="margin-bottom: 20px; opacity: 0.8;">' + message + '</p>' +
+            '<div style="background: #111; padding: 15px; border-radius: 8px; overflow: auto; max-height: 50vh;">' +
+            '<pre style="font-size: 11px; color: #888; margin: 0;">' + (error && error.stack ? error.stack : 'No stack trace available') + '</pre>' +
+            '</div>' +
+            '<button onclick="window.location.reload()" style="margin-top: 20px; background: #f43f5e; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">Retry</button>' +
+            '</div>';
+        }
+      };
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

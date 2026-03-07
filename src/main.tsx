@@ -1,18 +1,9 @@
 import { Buffer } from 'buffer';
 window.Buffer = Buffer;
-window.process = { env: { NODE_ENV: import.meta.env.MODE } } as any;
-
-// Global error handler to catch initialization crashes
-window.onerror = (message, source, lineno, colno, error) => {
-  console.error("Global Error Caught:", message, error);
-  const root = document.getElementById('root');
-  if (root && root.innerHTML === '') {
-    root.innerHTML = `<div style="padding: 20px; color: white; background: #111; font-family: sans-serif;">
-      <h1 style="color: #f43f5e">App Initialization Error</h1>
-      <p>${message}</p>
-      <pre style="font-size: 10px; opacity: 0.5;">${error?.stack || ''}</pre>
-    </div>`;
-  }
+window.process = window.process || { env: {} };
+(window.process as any).env = { 
+  ...(window.process as any).env,
+  NODE_ENV: import.meta.env.MODE 
 };
 
 import {StrictMode} from 'react';
@@ -21,7 +12,11 @@ import App from './App.tsx';
 import './index.css';
 import { UploadProvider } from './contexts/UploadContext';
 
-createRoot(document.getElementById('root')!).render(
+const container = document.getElementById('root');
+if (!container) throw new Error("Root container not found");
+
+const root = createRoot(container);
+root.render(
   <StrictMode>
     <UploadProvider>
       <App />
