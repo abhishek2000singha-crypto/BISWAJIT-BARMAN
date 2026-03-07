@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer';
 window.Buffer = Buffer;
-window.process = window.process || { env: {} };
+window.process = (window.process || { env: {} }) as any;
 (window.process as any).env = { 
   ...(window.process as any).env,
   NODE_ENV: import.meta.env.MODE 

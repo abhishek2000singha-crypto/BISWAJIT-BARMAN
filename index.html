@@ -24,13 +24,30 @@
         console.error("Critical Load Error:", message, error);
         const root = document.getElementById('root');
         if (root) {
-          root.innerHTML = '<div style="padding: 40px; color: white; background: #000; font-family: sans-serif; height: 100vh;">' +
-            '<h1 style="color: #f43f5e; margin-bottom: 10px;">App Load Error</h1>' +
-            '<p style="margin-bottom: 20px; opacity: 0.8;">' + message + '</p>' +
-            '<div style="background: #111; padding: 15px; border-radius: 8px; overflow: auto; max-height: 50vh;">' +
-            '<pre style="font-size: 11px; color: #888; margin: 0;">' + (error && error.stack ? error.stack : 'No stack trace available') + '</pre>' +
+          const isApiKeyError = message.toString().toLowerCase().includes('api key');
+          const errorTitle = isApiKeyError ? 'Missing API Configuration' : 'App Load Error';
+          const errorColor = isApiKeyError ? '#f59e0b' : '#f43f5e';
+          
+          root.innerHTML = '<div style="padding: 40px; color: white; background: #000; font-family: sans-serif; height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;">' +
+            '<div style="max-width: 500px; width: 100%;">' +
+            '<h1 style="color: ' + errorColor + '; margin-bottom: 15px; font-size: 24px;">' + errorTitle + '</h1>' +
+            '<p style="margin-bottom: 25px; opacity: 0.9; line-height: 1.6;">' + message + '</p>' +
+            (isApiKeyError ? 
+              '<div style="background: #1c1917; padding: 20px; border-radius: 12px; border: 1px solid #444; margin-bottom: 25px; text-align: left;">' +
+              '<p style="font-size: 14px; margin-bottom: 10px; color: #fbbf24;">Action Required:</p>' +
+              '<ol style="font-size: 13px; color: #ccc; padding-left: 20px; line-height: 1.8;">' +
+              '<li>Go to your Netlify Dashboard</li>' +
+              '<li>Site settings > Environment variables</li>' +
+              '<li>Add <b>GEMINI_API_KEY</b> with your Google AI key</li>' +
+              '<li>Trigger a new deploy</li>' +
+              '</ol>' +
+              '</div>' : 
+              '<div style="background: #111; padding: 15px; border-radius: 8px; overflow: auto; max-height: 30vh; text-align: left; margin-bottom: 25px;">' +
+              '<pre style="font-size: 11px; color: #888; margin: 0; white-space: pre-wrap;">' + (error && error.stack ? error.stack : 'No stack trace available') + '</pre>' +
+              '</div>'
+            ) +
+            '<button onclick="window.location.reload()" style="background: ' + errorColor + '; color: white; border: none; padding: 12px 30px; border-radius: 8px; cursor: pointer; font-weight: 600; transition: opacity 0.2s;">Retry Loading</button>' +
             '</div>' +
-            '<button onclick="window.location.reload()" style="margin-top: 20px; background: #f43f5e; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">Retry</button>' +
             '</div>';
         }
       };
