@@ -6,6 +6,7 @@ import { db, auth } from '../services/firebase';
 import { Comment, User, Video } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 import { sendNotification } from '../services/notificationService';
+import { useError } from '../contexts/ErrorContext';
 
 interface CommentsProps {
   videoId: string;
@@ -14,6 +15,7 @@ interface CommentsProps {
 }
 
 export const Comments: React.FC<CommentsProps> = ({ videoId, onClose, onUserClick }) => {
+  const { showError } = useError();
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -92,7 +94,7 @@ export const Comments: React.FC<CommentsProps> = ({ videoId, onClose, onUserClic
       setNewComment('');
     } catch (error) {
       console.error("Error adding comment:", error);
-      alert("Failed to post comment. Please try again.");
+      showError("Failed to post comment. Please try again.");
     } finally {
       setIsSubmitting(false);
     }

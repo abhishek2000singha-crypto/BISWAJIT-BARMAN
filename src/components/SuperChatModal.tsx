@@ -5,6 +5,7 @@ import { doc, updateDoc, increment, addDoc, collection, getDoc } from 'firebase/
 import { db } from '../services/firebase';
 import { User, Video } from '../types';
 import { sendNotification } from '../services/notificationService';
+import { useError } from '../contexts/ErrorContext';
 
 interface SuperChatModalProps {
   currentUser: User;
@@ -23,6 +24,7 @@ const SUPER_CHAT_PACKS = [
 const GIFT_AMOUNTS = [20, 50, 100, 200, 500, 1000];
 
 export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, targetUser, videoId, onClose }) => {
+  const { showError, showSuccess } = useError();
   const [mode, setMode] = useState<'buy' | 'gift'>(targetUser ? 'gift' : 'buy');
   const [selectedPack, setSelectedPack] = useState(SUPER_CHAT_PACKS[0]);
   const [giftAmount, setGiftAmount] = useState(GIFT_AMOUNTS[0]);
@@ -48,11 +50,11 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
         createdAt: Date.now()
       });
 
-      alert(`Successfully added ₹${selectedPack.amount} to your Super Chat Wallet!`);
+      showSuccess(`Successfully added ₹${selectedPack.amount} to your Super Chat Wallet!`);
       onClose();
     } catch (error) {
       console.error(error);
-      alert("Purchase failed");
+      showError("Purchase failed");
     } finally {
       setIsLoading(false);
     }
@@ -61,7 +63,7 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
   const handleSendGift = async () => {
     if (!targetUser) return;
     if (currentUser.superChatBalance < giftAmount) {
-      alert("Insufficient Super Chat balance. Please buy more credits.");
+      showError("Insufficient Super Chat balance. Please buy more credits.");
       setMode('buy');
       return;
     }
@@ -141,11 +143,11 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
         message: `sent you a ₹${giftAmount} Super Chat! ${giftMessage ? `"${giftMessage}"` : ''}`
       });
 
-      alert(`Successfully sent ₹${giftAmount} Super Chat to ${targetUser.name}!`);
+      showSuccess(`Successfully sent ₹${giftAmount} Super Chat to ${targetUser.name}!`);
       onClose();
     } catch (error) {
       console.error(error);
-      alert("Failed to send Super Chat");
+      showError("Failed to send Super Chat");
     } finally {
       setIsLoading(false);
     }

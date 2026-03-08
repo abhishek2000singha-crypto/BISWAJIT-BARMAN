@@ -5,13 +5,17 @@ import { VideoCard } from './VideoCard';
 import { Video, User } from '../types';
 import { LogoText } from './Logo';
 import { cn } from '../utils';
-import { Loader2 } from 'lucide-react';
+import { Loader2, RefreshCcw } from 'lucide-react';
+import { useError } from '../contexts/ErrorContext';
 
 export const Feed: React.FC<{ 
   currentUser: User | null, 
   onUserClick?: (uid: string) => void,
-  initialVideoId?: string 
-}> = ({ currentUser, onUserClick, initialVideoId }) => {
+  initialVideoId?: string,
+  isMuted?: boolean,
+  onMuteToggle?: () => void
+}> = ({ currentUser, onUserClick, initialVideoId, isMuted = true, onMuteToggle }) => {
+  const { showError } = useError();
   const [videos, setVideos] = useState<Video[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [feedType, setFeedType] = useState<'foryou' | 'following'>('foryou');
@@ -99,8 +103,12 @@ export const Feed: React.FC<{
           return updatedVids;
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error loading videos:", error);
+      const message = error.code === 'unavailable' 
+        ? "Network unavailable. Please check your connection."
+        : "Failed to load videos. Please try again.";
+      showError(message);
     } finally {
       setLoading(false);
     }
@@ -165,11 +173,21 @@ export const Feed: React.FC<{
         className="h-full w-full overflow-y-scroll snap-y snap-mandatory scrollbar-hide"
       >
         {videos.length === 0 && !loading ? (
-          <div className="h-full w-full flex flex-col items-center justify-center text-zinc-500 space-y-4">
-            <div className="w-16 h-16 bg-zinc-900 rounded-full flex items-center justify-center animate-pulse">
+          <div className="h-full w-full flex flex-col items-center justify-center text-zinc-500 space-y-6 p-8 text-center">
+            <div className="w-20 h-20 bg-zinc-900 rounded-full flex items-center justify-center animate-pulse border border-white/5">
               <LogoText className="opacity-20" />
             </div>
-            <p className="text-sm">No reels found. Be the first to upload!</p>
+            <div>
+              <p className="text-sm font-bold text-white mb-2">No reels found</p>
+              <p className="text-xs text-zinc-500">Be the first to upload or check your connection.</p>
+            </div>
+            <button 
+              onClick={() => loadVideos(true)}
+              className="bg-zinc-900 border border-white/10 px-6 py-3 rounded-2xl text-xs font-bold uppercase tracking-widest flex items-center space-x-2 hover:bg-zinc-800 transition-all"
+            >
+              <RefreshCcw size={14} />
+              <span>Retry Load</span>
+            </button>
           </div>
         ) : (
           <>
@@ -179,6 +197,9 @@ export const Feed: React.FC<{
                   video={video} 
                   currentUser={currentUser}
                   isActive={index === activeIndex} 
+                  shouldLoad={Math.abs(index - activeIndex) <= 1}
+                  isMuted={isMuted}
+                  onMuteToggle={onMuteToggle}
                   onUserClick={onUserClick}
                 />
               </div>

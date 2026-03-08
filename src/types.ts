@@ -114,6 +114,8 @@ export interface BoostTransaction {
   planId: string;
   planName: string;
   amount: number;
+  platformFee?: number;
+  creatorShare?: number;
   status: 'success' | 'failed' | 'pending';
   createdAt: number;
   expiryAt: number;
@@ -165,12 +167,18 @@ export interface WithdrawalRequest {
   userName: string;
   amount: number;
   status: 'pending' | 'approved' | 'rejected';
+  payoutType: 'domestic' | 'international';
   bankDetails: {
     accountNumber: string;
-    ifscCode: string;
     accountHolderName: string;
     bankName: string;
+    ifscCode?: string;
+    swiftCode?: string;
+    iban?: string;
+    country?: string;
+    paypalEmail?: string;
   };
+  rejectionReason?: string;
   createdAt: number;
   processedAt?: number;
 }

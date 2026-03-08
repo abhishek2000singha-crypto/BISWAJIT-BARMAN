@@ -2,9 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Loader2, AlertCircle, X, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Logo, LogoText } from './Logo';
+import { cn } from '../utils';
+import { useError } from '../contexts/ErrorContext';
 
 export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => void }> = ({ onLogin, onCancel }) => {
+  const { showError, showSuccess } = useError();
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
+  const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -33,9 +38,10 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
       setDemoOtp("1234");
       setStep('otp');
       setResendTimer(60);
+      showSuccess("OTP sent successfully!");
     } catch (err: any) {
       console.error("Auth Error:", err);
-      setError("Something went wrong. Please try again.");
+      showError("Failed to send OTP. Please check your connection.");
     } finally {
       setIsLoading(false);
     }
@@ -50,9 +56,11 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
       // In demo mode, we just check against "1234"
       if (otp === "1234") {
         const isAdmin = phone === "9999999999";
+        const displayName = authMode === 'signup' ? name : (isAdmin ? "Admin" : `User_${phone.slice(-4)}`);
+        
         onLogin({
           uid: `user_${phone}`,
-          name: isAdmin ? "Admin" : `User_${phone.slice(-4)}`,
+          name: displayName,
           mobile: `+91${phone}`,
           profileImage: isAdmin ? "https://picsum.photos/seed/admin/200/200" : `https://picsum.photos/seed/${phone}/200/200`,
           role: isAdmin ? 'admin' : 'user',
@@ -60,11 +68,12 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
           superChatBalance: 0,
           createdAt: Date.now()
         });
+        showSuccess("Logged in successfully!");
       } else {
         throw new Error("Invalid OTP. Please try again.");
       }
     } catch (err: any) {
-      setError(err.message);
+      showError(err.message);
     } finally {
       setIsLoading(false);
     }
@@ -89,7 +98,30 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
         </div>
 
         <LogoText className="mb-2 justify-center" />
-        <p className="text-zinc-500 text-sm mb-10">India's premier short video platform for creators.</p>
+        <p className="text-zinc-500 text-sm mb-8">
+          {authMode === 'login' ? "Welcome back to REELS KING" : "Join the REELS KING community"}
+        </p>
+
+        <div className="flex bg-zinc-900 p-1 rounded-2xl mb-8 border border-white/5">
+          <button 
+            onClick={() => setAuthMode('login')}
+            className={cn(
+              "flex-1 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+              authMode === 'login' ? "bg-white text-black shadow-lg" : "text-zinc-500 hover:text-white"
+            )}
+          >
+            Login
+          </button>
+          <button 
+            onClick={() => setAuthMode('signup')}
+            className={cn(
+              "flex-1 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+              authMode === 'signup' ? "bg-rose-500 text-white shadow-lg shadow-rose-500/20" : "text-zinc-500 hover:text-white"
+            )}
+          >
+            Create Account
+          </button>
+        </div>
 
         {error && (
           <div className="mb-6 p-3 bg-rose-500/10 border border-rose-500/50 rounded-xl flex items-start space-x-2 text-left">
@@ -107,23 +139,43 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
               exit={{ x: 20, opacity: 0 }}
               className="space-y-4"
             >
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-bold">+91</span>
-                <input 
-                  type="tel"
-                  autoFocus
-                  placeholder="Mobile Number"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl py-4 pl-14 pr-4 focus:outline-none focus:border-rose-500 transition-colors font-bold tracking-widest"
-                />
+              <div className="space-y-4">
+                {authMode === 'signup' && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    className="overflow-hidden"
+                  >
+                    <input 
+                      type="text"
+                      placeholder="Full Name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl py-4 px-4 focus:outline-none focus:border-rose-500 transition-colors font-bold"
+                    />
+                  </motion.div>
+                )}
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-bold">+91</span>
+                  <input 
+                    type="tel"
+                    autoFocus
+                    placeholder="Mobile Number"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl py-4 pl-14 pr-4 focus:outline-none focus:border-rose-500 transition-colors font-bold tracking-widest"
+                  />
+                </div>
               </div>
               <button 
                 onClick={handleSendOTP}
-                disabled={phone.length < 10 || isLoading}
-                className="w-full bg-white text-black py-4 rounded-2xl font-bold hover:bg-zinc-200 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
+                disabled={(authMode === 'signup' && !name) || phone.length < 10 || isLoading}
+                className={cn(
+                  "w-full py-4 rounded-2xl font-bold transition-all flex items-center justify-center space-x-2 mt-4",
+                  authMode === 'signup' ? "bg-rose-500 text-white hover:bg-rose-600" : "bg-white text-black hover:bg-zinc-200"
+                )}
               >
-                {isLoading ? <Loader2 className="animate-spin" /> : <span>Send OTP</span>}
+                {isLoading ? <Loader2 className="animate-spin" /> : <span>{authMode === 'login' ? 'Send OTP' : 'Create & Send OTP'}</span>}
               </button>
             </motion.div>
           ) : (

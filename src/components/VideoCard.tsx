@@ -11,15 +11,20 @@ import { SuperChatModal } from './SuperChatModal';
 import { BoostModal } from './BoostModal';
 import confetti from 'canvas-confetti';
 import { sendNotification } from '../services/notificationService';
+import { useError } from '../contexts/ErrorContext';
 
 interface VideoCardProps {
   video: Video;
   currentUser: User | null;
   isActive: boolean;
+  shouldLoad: boolean;
+  isMuted?: boolean;
+  onMuteToggle?: () => void;
   onUserClick?: (uid: string) => void;
 }
 
-export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, currentUser, isActive, onUserClick }) => {
+export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, currentUser, isActive, shouldLoad, isMuted = true, onMuteToggle, onUserClick }) => {
+  const { showError, showSuccess } = useError();
   const [video, setVideo] = useState<Video>(initialVideo);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isLiked, setIsLiked] = useState(false);
@@ -32,8 +37,8 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
   const [videoCreator, setVideoCreator] = useState<User | null>(null);
   const [recentSuperChat, setRecentSuperChat] = useState<any>(null);
   const [isPlaying, setIsPlaying] = useState(true);
-  const [isMuted, setIsMuted] = useState(true);
   const [showPlayPauseIcon, setShowPlayPauseIcon] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   // Real-time listener for the video document to keep counts updated
   useEffect(() => {
@@ -106,6 +111,19 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
       return () => unsubscribe();
     }
   }, [video.id, auth.currentUser?.uid]);
+
+  useEffect(() => {
+    const videoElement = videoRef.current;
+    if (!videoElement) return;
+
+    const handleTimeUpdate = () => {
+      const p = (videoElement.currentTime / videoElement.duration) * 100;
+      setProgress(p);
+    };
+
+    videoElement.addEventListener('timeupdate', handleTimeUpdate);
+    return () => videoElement.removeEventListener('timeupdate', handleTimeUpdate);
+  }, []);
 
   useEffect(() => {
     if (video.type === 'video' && videoRef.current) {
@@ -191,7 +209,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
   const handleFollow = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!auth.currentUser) {
-      alert("Please login to follow creators");
+      showError("Please login to follow creators");
       return;
     }
     if (video.userId === auth.currentUser.uid) return;
@@ -244,7 +262,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!auth.currentUser) {
-      alert("Please login to like videos");
+      showError("Please login to like videos");
       return;
     }
 
@@ -294,18 +312,19 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
 
   const handleShare = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    const videoUrl = `${window.location.origin}?video=${video.id}`;
     const shareData = {
       title: 'Check out this reel!',
       text: video.caption,
-      url: window.location.href,
+      url: videoUrl,
     };
 
     try {
       if (navigator.share) {
         await navigator.share(shareData);
       } else {
-        await navigator.clipboard.writeText(window.location.href);
-        alert("Link copied to clipboard!");
+        await navigator.clipboard.writeText(videoUrl);
+        showSuccess("Link copied to clipboard!");
       }
       
       // Increment share count
@@ -318,7 +337,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
 
   const toggleMute = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsMuted(!isMuted);
+    onMuteToggle?.();
   };
 
   return (
@@ -330,7 +349,8 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
       {video.type === 'video' ? (
         <video
           ref={videoRef}
-          src={video.videoUrl}
+          src={shouldLoad ? video.videoUrl : undefined}
+          poster={video.thumbnailUrl}
           className="h-full w-full object-contain"
           loop
           playsInline
@@ -338,7 +358,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
         />
       ) : (
         <img
-          src={video.videoUrl}
+          src={shouldLoad ? video.videoUrl : video.thumbnailUrl}
           className="h-full w-full object-contain"
           alt={video.caption || 'Photo Post'}
           referrerPolicy="no-referrer"
@@ -575,6 +595,17 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
           </span>
         </div>
       </div>
+
+      {/* Progress Bar */}
+      {video.type === 'video' && (
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10 z-20">
+          <motion.div 
+            className="h-full bg-rose-500"
+            style={{ width: `${progress}%` }}
+            transition={{ type: 'spring', bounce: 0, duration: 0.1 }}
+          />
+        </div>
+      )}
 
       {/* Heart Animation */}
       <AnimatePresence>

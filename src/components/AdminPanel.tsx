@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Video, TrendingUp, DollarSign, ShieldCheck, Ban, Trash2, CheckCircle, XCircle, Loader2, CreditCard, AlertTriangle, LogOut, Search, Landmark, ChevronDown, ChevronUp, Sparkles, Gift, IndianRupee, Wallet, Plus, ClipboardList, Clock, CheckCircle2, X, Calendar, CloudUpload, Rocket, UserPlus, Activity, BarChart3, PieChart as PieChartIcon } from 'lucide-react';
+import { Users, Video, TrendingUp, DollarSign, ShieldCheck, Ban, Trash2, CheckCircle, XCircle, Loader2, CreditCard, AlertTriangle, LogOut, Search, Landmark, ChevronDown, ChevronUp, Sparkles, Gift, IndianRupee, Wallet, Plus, ClipboardList, Clock, CheckCircle2, X, Calendar, CloudUpload, Rocket, UserPlus, Activity, BarChart3, PieChart as PieChartIcon, Send } from 'lucide-react';
 import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, orderBy, getDocs, writeBatch, getDoc, increment, addDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { User as UserType, Video as VideoType, BoostTransaction, AdminTask } from '../types';
@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useUpload } from '../contexts/UploadContext';
 import { cn } from '../utils';
 import { sendNotification } from '../services/notificationService';
+import { useError } from '../contexts/ErrorContext';
 import { 
   AreaChart, 
   Area, 
@@ -25,6 +26,7 @@ import {
 } from 'recharts';
 
 export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void }> = ({ currentUser, onLogout }) => {
+  const { showError, showSuccess } = useError();
   const { uploads, removeUpload } = useUpload();
   const [activeTab, setActiveTab] = useState('stats');
   const [pendingUsers, setPendingUsers] = useState<UserType[]>([]);
@@ -50,6 +52,10 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
   const [showTransferConfirm, setShowTransferConfirm] = useState(false);
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [videoSearchQuery, setVideoSearchQuery] = useState('');
+  const [paymentSearchQuery, setPaymentSearchQuery] = useState('');
+  const [withdrawalSearchQuery, setWithdrawalSearchQuery] = useState('');
+  const [superChatSearchQuery, setSuperChatSearchQuery] = useState('');
+  const [taskSearchQuery, setTaskSearchQuery] = useState('');
   const [walletSearchQuery, setWalletSearchQuery] = useState('');
   const [expandedWithdrawalId, setExpandedWithdrawalId] = useState<string | null>(null);
   const [showRejectionModal, setShowRejectionModal] = useState<string | null>(null);
@@ -325,22 +331,24 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
         });
       });
       await batch.commit();
-      alert(`Successfully approved ${pendingUsers.length} users!`);
+      showSuccess(`Successfully approved ${pendingUsers.length} users!`);
     } catch (error) {
       console.error(error);
-      alert("Failed to bulk approve users.");
+      showError("Failed to bulk approve users.");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleUserAction = async (userId: string, isBanned: boolean) => {
+  const handleUserAction = async (userId: string, currentRole: string) => {
     setActionLoading(userId);
     try {
       const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, { role: isBanned ? 'user' : 'banned' as any }); // Simple ban logic
+      const newRole = currentRole === 'banned' ? 'user' : 'banned';
+      await updateDoc(userRef, { role: newRole });
     } catch (error) {
       console.error(error);
+      alert("Failed to update user status");
     } finally {
       setActionLoading(null);
     }
@@ -356,7 +364,7 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
     if (isNaN(amount) || amount <= 0) return;
 
     if ((currentUser.walletBalance || 0) < amount) {
-      alert("Insufficient balance in your admin wallet!");
+      showError("Insufficient balance in your admin wallet!");
       return;
     }
 
@@ -381,10 +389,10 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
       setShowSendMoneyModal(null);
       setShowTransferConfirm(false);
       setSendAmount('');
-      alert(`Successfully transferred ₹${amount} to ${showSendMoneyModal.name}`);
+      showSuccess(`Successfully transferred ₹${amount} to ${showSendMoneyModal.name}`);
     } catch (error) {
       console.error(error);
-      alert("Failed to transfer money");
+      showError("Failed to transfer money");
     } finally {
       setActionLoading(null);
     }
@@ -486,7 +494,7 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
           message: `Your withdrawal request for ₹${amount} has been approved and processed.`
         });
 
-        alert(`Withdrawal of ₹${amount} approved.`);
+        showSuccess(`Withdrawal of ₹${amount} approved.`);
       } else {
         // Refund the user if rejected
         const userRef = doc(db, 'users', userId);
@@ -527,14 +535,14 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
           message: `Your withdrawal request for ₹${amount} was rejected. Reason: ${reason || 'No reason provided'}. The amount has been refunded to your wallet.`
         });
 
-        alert(`Withdrawal request rejected and refunded.`);
+        showSuccess(`Withdrawal request rejected and refunded.`);
       }
       
       setShowRejectionModal(null);
       setRejectionReason('');
     } catch (error) {
       console.error(error);
-      alert("Failed to update withdrawal status");
+      showError("Failed to update withdrawal status");
     } finally {
       setActionLoading(null);
     }
@@ -719,7 +727,7 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
                   <input 
                     type="text"
-                    placeholder="Search by name or username..."
+                    placeholder="Search by name or mobile..."
                     value={walletSearchQuery}
                     onChange={(e) => setWalletSearchQuery(e.target.value)}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-4 pl-12 pr-4 text-white focus:outline-none focus:border-emerald-500 transition-colors"
@@ -736,9 +744,12 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
               </div>
 
               {walletSearchQuery && (
-                <div className="max-h-60 overflow-y-auto bg-zinc-950 border border-zinc-800 rounded-2xl p-2 space-y-1">
+                <div className="max-h-60 overflow-y-auto bg-zinc-950 border border-zinc-800 rounded-2xl p-2 space-y-1 animate-in fade-in slide-in-from-top-2">
                   {allUsers
-                    .filter(u => u.name.toLowerCase().includes(walletSearchQuery.toLowerCase()))
+                    .filter(u => 
+                      u.name?.toLowerCase().includes(walletSearchQuery.toLowerCase()) || 
+                      u.mobile?.includes(walletSearchQuery)
+                    )
                     .slice(0, 5)
                     .map(u => (
                       <button 
@@ -750,7 +761,7 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
                         className="w-full flex items-center justify-between p-3 hover:bg-zinc-900 rounded-xl transition-colors text-left"
                       >
                         <div className="flex items-center space-x-3">
-                          <img src={u.profileImage} className="w-8 h-8 rounded-full object-cover" />
+                          <img src={u.profileImage} className="w-8 h-8 rounded-full object-cover" alt="" />
                           <div>
                             <p className="text-sm font-bold">@{u.name}</p>
                             <p className="text-[10px] text-zinc-500">Balance: ₹{(u.walletBalance || 0).toLocaleString()}</p>
@@ -760,11 +771,55 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
                       </button>
                     ))
                   }
-                  {allUsers.filter(u => u.name.toLowerCase().includes(walletSearchQuery.toLowerCase())).length === 0 && (
+                  {allUsers.filter(u => 
+                    u.name?.toLowerCase().includes(walletSearchQuery.toLowerCase()) || 
+                    u.mobile?.includes(walletSearchQuery)
+                  ).length === 0 && (
                     <p className="text-center py-4 text-zinc-500 text-xs">No users found</p>
                   )}
                 </div>
               )}
+
+              {showSendMoneyModal && (
+                <div className="bg-emerald-500/10 border border-emerald-500/30 p-4 rounded-2xl flex items-center justify-between animate-in zoom-in-95">
+                  <div className="flex items-center space-x-3">
+                    <img src={showSendMoneyModal.profileImage} className="w-10 h-10 rounded-full object-cover" alt="" />
+                    <div>
+                      <p className="text-xs text-zinc-500 font-bold uppercase tracking-widest">Selected Recipient</p>
+                      <p className="text-sm font-bold">@{showSendMoneyModal.name}</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setShowSendMoneyModal(null)}
+                    className="p-2 hover:bg-rose-500/10 text-rose-500 rounded-lg transition-colors"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Transfer Amount</label>
+                <div className="relative">
+                  <IndianRupee className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500" size={18} />
+                  <input 
+                    type="number"
+                    placeholder="Enter amount to transfer..."
+                    value={sendAmount}
+                    onChange={(e) => setSendAmount(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-4 pl-12 pr-4 text-white focus:outline-none focus:border-emerald-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <button 
+                onClick={() => setShowTransferConfirm(true)}
+                disabled={!showSendMoneyModal || !sendAmount || parseFloat(sendAmount) <= 0}
+                className="w-full bg-emerald-500 text-white py-5 rounded-2xl font-black text-lg flex items-center justify-center space-x-3 hover:bg-emerald-600 transition-all disabled:opacity-50 disabled:grayscale"
+              >
+                <Send size={20} />
+                <span>Transfer Funds</span>
+              </button>
 
               <div className="bg-emerald-500/5 border border-emerald-500/10 p-6 rounded-3xl">
                 <div className="flex items-center justify-between mb-2">
@@ -813,13 +868,33 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
               <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Task Management</h3>
               <p className="text-[10px] text-zinc-500 mt-1">Moderation and support queue</p>
             </div>
-            <button 
-              onClick={() => setShowCreateTaskModal(true)}
-              className="bg-rose-500 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-rose-500/90 transition-colors flex items-center space-x-2 shadow-lg shadow-rose-500/20"
-            >
-              <Plus size={14} />
-              <span>Create Task</span>
-            </button>
+            <div className="flex items-center space-x-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+                <input 
+                  type="text"
+                  placeholder="Search tasks..."
+                  value={taskSearchQuery}
+                  onChange={(e) => setTaskSearchQuery(e.target.value)}
+                  className="bg-zinc-900 border border-zinc-800 rounded-xl py-2 pl-9 pr-8 text-xs focus:outline-none focus:border-rose-500 transition-colors w-48"
+                />
+                {taskSearchQuery && (
+                  <button 
+                    onClick={() => setTaskSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+              <button 
+                onClick={() => setShowCreateTaskModal(true)}
+                className="bg-rose-500 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-rose-500/90 transition-colors flex items-center space-x-2 shadow-lg shadow-rose-500/20"
+              >
+                <Plus size={14} />
+                <span>Create Task</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-4">
@@ -829,7 +904,13 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
                 <p className="text-zinc-500 text-sm">No tasks found. Create one to get started.</p>
               </div>
             ) : (
-              tasks.map(task => (
+              tasks
+                .filter(t => 
+                  t.title.toLowerCase().includes(taskSearchQuery.toLowerCase()) || 
+                  t.description.toLowerCase().includes(taskSearchQuery.toLowerCase()) ||
+                  t.assignedToName?.toLowerCase().includes(taskSearchQuery.toLowerCase())
+                )
+                .map(task => (
                 <div key={task.id} className="bg-zinc-900 border border-zinc-800 p-6 rounded-[32px] flex flex-col space-y-4">
                   <div className="flex items-start justify-between">
                     <div className="flex items-start space-x-4">
@@ -1218,7 +1299,7 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
                   </div>
                 </div>
                 <button 
-                  onClick={() => handleUserAction(user.uid, user.role === 'user')}
+                  onClick={() => handleUserAction(user.uid, user.role)}
                   className={`p-2 rounded-lg transition-colors ${user.role === 'user' ? 'bg-rose-500/10 text-rose-500 hover:bg-rose-500/20' : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20'}`}
                 >
                   {user.role === 'user' ? <Ban size={18} /> : <CheckCircle size={18} />}
@@ -1462,13 +1543,39 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
 
       {activeTab === 'payments' && (
         <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Payment Transactions</h3>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+              <input 
+                type="text"
+                placeholder="Search plan or user ID..."
+                value={paymentSearchQuery}
+                onChange={(e) => setPaymentSearchQuery(e.target.value)}
+                className="bg-zinc-900 border border-zinc-800 rounded-xl py-2 pl-9 pr-8 text-xs focus:outline-none focus:border-rose-500 transition-colors w-56"
+              />
+              {paymentSearchQuery && (
+                <button 
+                  onClick={() => setPaymentSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-[32px]">
               <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-4 flex items-center">
                 <Rocket size={16} className="mr-2 text-amber-500" /> Boost Revenue (100%)
               </h3>
               <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                {transactions.map(tx => (
+                {transactions
+                  .filter(tx => 
+                    tx.planName?.toLowerCase().includes(paymentSearchQuery.toLowerCase()) || 
+                    tx.userId?.toLowerCase().includes(paymentSearchQuery.toLowerCase())
+                  )
+                  .map(tx => (
                   <div key={tx.id} className="bg-black/40 border border-white/5 p-4 rounded-2xl flex items-center justify-between">
                     <div>
                       <p className="font-bold text-sm">{tx.planName}</p>
@@ -1485,7 +1592,12 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
                 <Sparkles size={16} className="mr-2 text-rose-500" /> Super Chat Comm. (30%)
               </h3>
               <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                {superChats.map(chat => (
+                {superChats
+                  .filter(chat => 
+                    chat.senderName?.toLowerCase().includes(paymentSearchQuery.toLowerCase()) || 
+                    chat.receiverName?.toLowerCase().includes(paymentSearchQuery.toLowerCase())
+                  )
+                  .map(chat => (
                   <div key={chat.id} className="bg-black/40 border border-white/5 p-4 rounded-2xl flex items-center justify-between">
                     <div>
                       <p className="font-bold text-sm">Gift from @{chat.senderName}</p>
@@ -1507,7 +1619,25 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Withdrawal Requests</h3>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+                <input 
+                  type="text"
+                  placeholder="Search user..."
+                  value={withdrawalSearchQuery}
+                  onChange={(e) => setWithdrawalSearchQuery(e.target.value)}
+                  className="bg-zinc-900 border border-zinc-800 rounded-xl py-2 pl-9 pr-8 text-xs focus:outline-none focus:border-rose-500 transition-colors w-48"
+                />
+                {withdrawalSearchQuery && (
+                  <button 
+                    onClick={() => setWithdrawalSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
               <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Total Payouts: ₹{totalPayouts.toLocaleString()}</span>
             </div>
           </div>
@@ -1533,7 +1663,9 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
             </div>
           ) : (
             <div className="space-y-3">
-              {withdrawalRequests.map(request => (
+              {withdrawalRequests
+                .filter(r => r.userName?.toLowerCase().includes(withdrawalSearchQuery.toLowerCase()))
+                .map(request => (
                 <div key={request.id} className="bg-zinc-900 border border-zinc-800 p-6 rounded-[32px] flex flex-col space-y-4">
                   <div 
                     className="flex items-center justify-between cursor-pointer"
@@ -1660,7 +1792,27 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
 
       {activeTab === 'superchats' && (
         <div className="space-y-4">
-          <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Super Chat Transactions</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Super Chat Transactions</h3>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+              <input 
+                type="text"
+                placeholder="Search sender/receiver..."
+                value={superChatSearchQuery}
+                onChange={(e) => setSuperChatSearchQuery(e.target.value)}
+                className="bg-zinc-900 border border-zinc-800 rounded-xl py-2 pl-9 pr-8 text-xs focus:outline-none focus:border-rose-500 transition-colors w-56"
+              />
+              {superChatSearchQuery && (
+                <button 
+                  onClick={() => setSuperChatSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
           {superChats.length === 0 ? (
             <div className="bg-zinc-900/50 border border-dashed border-zinc-800 p-10 rounded-[32px] text-center">
               <Sparkles className="mx-auto text-zinc-700 mb-3" size={40} />
@@ -1668,7 +1820,13 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
             </div>
           ) : (
             <div className="space-y-3">
-              {superChats.map(chat => (
+              {superChats
+                .filter(chat => 
+                  chat.senderName?.toLowerCase().includes(superChatSearchQuery.toLowerCase()) || 
+                  chat.receiverName?.toLowerCase().includes(superChatSearchQuery.toLowerCase()) ||
+                  chat.message?.toLowerCase().includes(superChatSearchQuery.toLowerCase())
+                )
+                .map(chat => (
                 <div key={chat.id} className="bg-zinc-900 border border-zinc-800 p-6 rounded-[32px] flex flex-col space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">

@@ -26,6 +26,21 @@ export default function App() {
   const [initialVideoId, setInitialVideoId] = useState<string | null>(null);
   const [isDraggingGlobal, setIsDraggingGlobal] = useState(false);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+  const [isMuted, setIsMuted] = useState(true);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const videoId = params.get('video');
+    const profileId = params.get('profile');
+    
+    if (videoId) {
+      setInitialVideoId(videoId);
+      setActiveTab('home');
+    } else if (profileId) {
+      setViewingProfileId(profileId);
+      setActiveTab('profile');
+    }
+  }, []);
 
   useEffect(() => {
     const handleDragOver = (e: DragEvent) => {
@@ -172,11 +187,31 @@ export default function App() {
   const renderContent = () => {
     if (!user && activeTab !== 'home') return <Auth onLogin={setUser} onCancel={() => setActiveTab('home')} />;
     
+    if (user?.role === 'banned') {
+      return (
+        <div className="h-full w-full flex flex-col items-center justify-center p-8 text-center bg-zinc-950">
+          <div className="w-20 h-20 bg-rose-500/10 rounded-full flex items-center justify-center text-rose-500 mb-6">
+            <AlertCircle size={40} />
+          </div>
+          <h2 className="text-2xl font-black uppercase tracking-tighter italic mb-2">Account Banned</h2>
+          <p className="text-zinc-500 text-sm mb-8">Your account has been suspended for violating our community guidelines.</p>
+          <button 
+            onClick={handleLogout}
+            className="bg-zinc-800 text-white px-8 py-3 rounded-2xl font-bold text-sm hover:bg-zinc-700 transition-colors"
+          >
+            Logout
+          </button>
+        </div>
+      );
+    }
+
     switch (activeTab) {
       case 'home': return (
         <Feed 
           currentUser={user} 
           initialVideoId={initialVideoId || undefined}
+          isMuted={isMuted}
+          onMuteToggle={() => setIsMuted(!isMuted)}
           onUserClick={(uid) => {
             setViewingProfileId(uid);
             setActiveTab('profile');
@@ -211,6 +246,7 @@ export default function App() {
             setActiveTab('messages');
             setViewingProfileId(null);
           }}
+          onUploadClick={() => setActiveTab('upload')}
         />
       );
       case 'admin': return <AdminPanel currentUser={user} onLogout={handleLogout} />;
@@ -228,7 +264,7 @@ export default function App() {
           }}
         />
       );
-      default: return <Feed onUserClick={(uid) => {
+      default: return <Feed currentUser={user} onUserClick={(uid) => {
         setViewingProfileId(uid);
         setActiveTab('profile');
       }} />;
@@ -299,6 +335,11 @@ export default function App() {
                   setViewingProfileId(null);
                 }}
                 onNavigate={(uid) => setViewingProfileId(uid)}
+                onUploadClick={() => {
+                  setShowProfileModal(false);
+                  setViewingProfileId(null);
+                  setActiveTab('upload');
+                }}
               />
             </motion.div>
           </div>

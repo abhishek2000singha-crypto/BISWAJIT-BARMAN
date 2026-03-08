@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Grid, Heart, Settings, Wallet, Rocket, CheckCircle2, IndianRupee, Eye, MessageCircle, Share2, LayoutDashboard, Camera, Edit3, Loader2, LogOut, ChevronLeft, Sparkles, Gift, Clock, AlertCircle, X, Landmark, Lock } from 'lucide-react';
+import { User, Grid, Heart, Settings, Wallet, Rocket, CheckCircle2, IndianRupee, Eye, MessageCircle, Share2, LayoutDashboard, Camera, Edit3, Loader2, LogOut, ChevronLeft, Sparkles, Gift, Clock, AlertCircle, X, Landmark, Lock, Upload as UploadIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BOOST_PLANS, BoostPlan, User as UserType, BoostTransaction, Video as VideoType, Transaction as WalletTransaction, WithdrawalRequest } from '../types';
 import { Logo } from './Logo';
@@ -12,6 +12,7 @@ import { doc, updateDoc, collection, addDoc, query, where, orderBy, onSnapshot, 
 import { db } from '../services/firebase';
 import { format } from 'date-fns';
 import { formatNumber, cn } from '../utils';
+import { useError } from '../contexts/ErrorContext';
 
 export const Profile: React.FC<{ 
   user: UserType, 
@@ -19,8 +20,10 @@ export const Profile: React.FC<{
   viewingUserId?: string, 
   onBack?: () => void,
   onNavigate?: (uid: string) => void,
-  onMessageClick?: (uid: string) => void
-}> = ({ user: currentUser, onLogout, viewingUserId, onBack, onNavigate, onMessageClick }) => {
+  onMessageClick?: (uid: string) => void,
+  onUploadClick?: () => void
+}> = ({ user: currentUser, onLogout, viewingUserId, onBack, onNavigate, onMessageClick, onUploadClick }) => {
+  const { showError, showSuccess } = useError();
   const isOwnProfile = !viewingUserId || viewingUserId === currentUser.uid;
   const [user, setUser] = useState<UserType | null>(isOwnProfile ? currentUser : null);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -248,7 +251,7 @@ export const Profile: React.FC<{
     }
 
     if (!user.bankAccountNumber || !user.ifscCode || !user.accountHolderName) {
-      alert("Please complete your bank details in profile settings first");
+      showError("Please complete your bank details in profile settings first");
       setShowEditModal(true);
       return;
     }
@@ -292,12 +295,12 @@ export const Profile: React.FC<{
       });
 
       await batch.commit();
-      alert("Withdrawal request submitted successfully!");
+      showSuccess("Withdrawal request submitted successfully!");
       setShowWithdrawModal(false);
       setWithdrawAmount('');
-    } catch (error) {
+    } catch (error: any) {
       console.error("Withdrawal failed:", error);
-      alert("Failed to submit withdrawal request");
+      showError(error.code === 'permission-denied' ? "Permission denied. Please check your account status." : "Failed to submit withdrawal request.");
     } finally {
       setIsWithdrawing(false);
     }
@@ -414,6 +417,20 @@ export const Profile: React.FC<{
         });
         batch.update(creatorRef, { followersCount: increment(1) });
         batch.update(currentUserRef, { followingCount: increment(1) });
+        
+        // Add notification
+        const notificationRef = doc(collection(db, 'notifications'));
+        batch.set(notificationRef, {
+          userId: viewingUserId,
+          senderId: currentUser.uid,
+          senderName: currentUser.name,
+          senderProfileImage: currentUser.profileImage,
+          type: 'follow',
+          message: `${currentUser.name} started following you`,
+          read: false,
+          createdAt: Date.now()
+        });
+
         setIsFollowing(true);
       }
 
@@ -463,10 +480,11 @@ export const Profile: React.FC<{
           youtube: editYoutube
         }
       });
+      showSuccess("Profile updated successfully!");
       setShowEditModal(false);
     } catch (error) {
       console.error("Failed to update profile", error);
-      alert("Failed to update profile");
+      showError("Failed to update profile. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -580,6 +598,17 @@ export const Profile: React.FC<{
             <div className="flex items-center space-x-2">
               <h2 className="text-2xl font-black tracking-tight">@{user?.name || 'raj_kumar'}</h2>
               {user.isPrivate && <Lock size={16} className="text-zinc-500" />}
+              <button 
+                onClick={() => {
+                  const url = `${window.location.origin}?profile=${user?.uid}`;
+                  navigator.clipboard.writeText(url);
+                  showSuccess("Profile link copied!");
+                }}
+                className="p-1.5 text-zinc-500 hover:text-white transition-colors"
+                title="Copy profile link"
+              >
+                <Share2 size={16} />
+              </button>
               {user.monetizationStatus && user.monetizationStatus !== 'none' && (
                 <div className={`flex items-center space-x-1 px-2 py-0.5 rounded-full border text-[10px] font-black uppercase tracking-tighter ${
                   user.monetizationStatus === 'approved' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500' :
@@ -665,6 +694,13 @@ export const Profile: React.FC<{
           <div className="flex space-x-3 mt-8 w-full">
             {isOwnProfile ? (
               <>
+                <button 
+                  onClick={onUploadClick}
+                  className="flex-1 bg-rose-500 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-rose-600 transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-rose-500/20 flex items-center justify-center space-x-2"
+                >
+                  <UploadIcon size={14} />
+                  <span>Upload</span>
+                </button>
                 <button 
                   onClick={() => setShowEditModal(true)}
                   className="flex-1 bg-white text-black py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-zinc-200 transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-white/5"
@@ -1868,6 +1904,7 @@ export const Profile: React.FC<{
                 video={selectedVideo} 
                 currentUser={currentUser}
                 isActive={true}
+                shouldLoad={true}
                 onUserClick={(uid) => {
                   setSelectedVideo(null);
                   onNavigate?.(uid);

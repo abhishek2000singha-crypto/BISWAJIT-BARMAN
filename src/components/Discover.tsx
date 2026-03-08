@@ -5,6 +5,7 @@ import { db } from '../services/firebase';
 import { Video, User } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatNumber, cn } from '../utils';
+import { useError } from '../contexts/ErrorContext';
 
 interface DiscoverProps {
   onUserClick: (uid: string) => void;
@@ -12,6 +13,7 @@ interface DiscoverProps {
 }
 
 export const Discover: React.FC<DiscoverProps> = ({ onUserClick, onVideoClick }) => {
+  const { showError } = useError();
   const [searchQuery, setSearchQuery] = useState('');
   const [trendingVideos, setTrendingVideos] = useState<Video[]>([]);
   const [popularCreators, setPopularCreators] = useState<User[]>([]);
@@ -27,8 +29,8 @@ export const Discover: React.FC<DiscoverProps> = ({ onUserClick, onVideoClick })
       return;
     }
 
+    setIsSearching(true);
     const delayDebounceFn = setTimeout(async () => {
-      setIsSearching(true);
       try {
         const q = searchQuery.toLowerCase();
         
@@ -57,6 +59,7 @@ export const Discover: React.FC<DiscoverProps> = ({ onUserClick, onVideoClick })
         setSearchResults({ videos: filteredVids, users: filteredUsers });
       } catch (error) {
         console.error("Search error:", error);
+        showError("Search failed. Please try again.");
       } finally {
         setIsSearching(false);
       }
@@ -110,6 +113,7 @@ export const Discover: React.FC<DiscoverProps> = ({ onUserClick, onVideoClick })
         };
       } catch (error) {
         console.error("Error fetching discover data:", error);
+        showError("Failed to load discover content.");
         setIsLoading(false);
       }
     };

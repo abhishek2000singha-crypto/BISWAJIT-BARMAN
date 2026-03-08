@@ -11,6 +11,8 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { UploadProvider } from './contexts/UploadContext';
+import { ErrorProvider } from './contexts/ErrorContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const container = document.getElementById('root');
 if (!container) throw new Error("Root container not found");
@@ -18,8 +20,12 @@ if (!container) throw new Error("Root container not found");
 const root = createRoot(container);
 root.render(
   <StrictMode>
-    <UploadProvider>
-      <App />
-    </UploadProvider>
+    <ErrorBoundary>
+      <ErrorProvider>
+        <UploadProvider>
+          <App />
+        </UploadProvider>
+      </ErrorProvider>
+    </ErrorBoundary>
   </StrictMode>,
 );

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload as UploadIcon, X, Sparkles, AlertTriangle, CheckCircle2, Loader2, Eye, Music, Camera } from 'lucide-react';
+import { Upload as UploadIcon, X, Sparkles, AlertTriangle, CheckCircle2, Loader2, Eye, Music, Camera, Mic, StopCircle, Circle, RefreshCw } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
 import { analyzeVideoContent } from '../services/geminiService';
 import { User, AudioTrack } from '../types';
 import { useUpload } from '../contexts/UploadContext';
+import { useError } from '../contexts/ErrorContext';
 import { cn, formatDuration } from '../utils';
 import { AudioLibrary } from './AudioLibrary';
 import { compressVideo } from '../utils/videoCompression';
@@ -29,10 +30,51 @@ const generateThumbnail = (file: File): Promise<string> => {
   });
 };
 
+const extractFrames = (file: File, count: number = 3): Promise<string[]> => {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    const frames: string[] = [];
+    
+    video.onloadedmetadata = () => {
+      const duration = video.duration;
+      const interval = duration / (count + 1);
+      let currentFrame = 0;
+
+      const capture = () => {
+        if (currentFrame < count) {
+          video.currentTime = (currentFrame + 1) * interval;
+        } else {
+          URL.revokeObjectURL(video.src);
+          resolve(frames);
+        }
+      };
+
+      video.onseeked = () => {
+        const canvas = document.createElement('canvas');
+        // Scale down for faster analysis
+        const scale = Math.min(1, 512 / Math.max(video.videoWidth, video.videoHeight));
+        canvas.width = video.videoWidth * scale;
+        canvas.height = video.videoHeight * scale;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+        frames.push(canvas.toDataURL('image/jpeg', 0.6));
+        currentFrame++;
+        capture();
+      };
+
+      capture();
+    };
+    video.src = URL.createObjectURL(file);
+  });
+};
+
 export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user, onComplete }) => {
+  const { showError, showSuccess } = useError();
   const { startUpload, finalizeUpload, updateThumbnail, uploads, removeUpload } = useUpload();
   const [file, setFile] = useState<File | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const recordingVideoRef = useRef<HTMLVideoElement>(null);
   const [isUpdatingThumb, setIsUpdatingThumb] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [preview, setPreview] = useState<string | null>(null);
@@ -53,6 +95,13 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [fileType, setFileType] = useState<'video' | 'photo'>('video');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<any>(null);
+  const [cameraFacing, setCameraFacing] = useState<'user' | 'environment'>('user');
 
   const currentUpload = uploads.find(u => u.id === currentUploadId);
 
@@ -68,119 +117,218 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
     }
   }, [currentUpload?.status]);
 
+  useEffect(() => {
+    if (stream && recordingVideoRef.current) {
+      recordingVideoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+    };
+  }, [stream]);
+
+  const processFile = async (droppedFile: File) => {
+    const isVideo = droppedFile.type.startsWith('video/');
+    const type = isVideo ? 'video' : 'photo';
+    setFileType(type);
+    
+    setFile(droppedFile);
+    setPreview(URL.createObjectURL(droppedFile));
+    
+    if (isVideo) {
+      // Get duration
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+        setDuration(video.duration);
+        URL.revokeObjectURL(video.src);
+      };
+      video.src = URL.createObjectURL(droppedFile);
+    } else {
+      setDuration(0);
+    }
+
+    handleAnalyze(droppedFile, type);
+
+    const startCompressedUpload = async () => {
+      setIsCompressing(isVideo); // Only show compression for video
+      setCompressionProgress(0);
+      
+      try {
+        let fileToUpload = droppedFile;
+        
+        if (isVideo) {
+          // Add a timeout to compression - if it takes more than 15 seconds to even start or show progress, fallback
+          const compressionPromise = compressVideo(droppedFile, (p) => setCompressionProgress(p));
+          const compressionTimeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Compression timeout")), 20000));
+          
+          const compressedBlob = await Promise.race([compressionPromise, compressionTimeoutPromise]) as Blob;
+          fileToUpload = new File([compressedBlob], droppedFile.name, { type: 'video/mp4' });
+        }
+        
+        // Start upload with compressed file (or original if photo)
+        const placeholderUrl = 'https://picsum.photos/seed/placeholder/300/533';
+        
+        const startImmediateUpload = async (thumbBlob: Blob) => {
+          const videoId = await startUpload(fileToUpload, thumbBlob, user, type);
+          setCurrentUploadId(videoId);
+        };
+
+        // Try to get real thumbnail
+        let thumbPromise: Promise<Blob | null>;
+        if (isVideo) {
+          thumbPromise = generateThumbnail(droppedFile).then(async (dataUrl) => {
+            const res = await fetch(dataUrl);
+            return await res.blob();
+          }).catch(() => null);
+        } else {
+          // For photos, the photo itself is the thumbnail
+          thumbPromise = Promise.resolve(droppedFile);
+        }
+
+        const thumbTimeoutPromise = new Promise<null>(resolve => setTimeout(() => resolve(null), 1500));
+
+        Promise.race([thumbPromise, thumbTimeoutPromise]).then(async (blob) => {
+          if (blob) {
+            setThumbnailBlob(blob);
+            startImmediateUpload(blob);
+          } else {
+            const res = await fetch(placeholderUrl);
+            const placeholderBlob = await res.blob();
+            setThumbnailBlob(placeholderBlob);
+            startImmediateUpload(placeholderBlob);
+          }
+        });
+      } catch (error) {
+        console.error("Upload preparation failed, falling back to original", error);
+        // Fallback to original file
+        const placeholderUrl = 'https://picsum.photos/seed/placeholder/300/533';
+        
+        const startImmediateUpload = async (thumbBlob: Blob) => {
+          const videoId = await startUpload(droppedFile, thumbBlob, user, type);
+          setCurrentUploadId(videoId);
+        };
+
+        let fallbackThumbPromise: Promise<Blob | null>;
+        if (isVideo) {
+          fallbackThumbPromise = generateThumbnail(droppedFile).then(async (dataUrl) => {
+            const res = await fetch(dataUrl);
+            return await res.blob();
+          }).catch(() => null);
+        } else {
+          fallbackThumbPromise = Promise.resolve(droppedFile);
+        }
+
+        const fallbackThumbTimeoutPromise = new Promise<null>(resolve => setTimeout(() => resolve(null), 1500));
+
+        Promise.race([fallbackThumbPromise, fallbackThumbTimeoutPromise]).then(async (blob) => {
+          if (blob) {
+            setThumbnailBlob(blob);
+            startImmediateUpload(blob);
+          } else {
+            const res = await fetch(placeholderUrl);
+            const placeholderBlob = await res.blob();
+            setThumbnailBlob(placeholderBlob);
+            startImmediateUpload(placeholderBlob);
+          }
+        });
+      } finally {
+        setIsCompressing(false);
+      }
+    };
+
+    startCompressedUpload();
+  };
+
   const onDrop = (acceptedFiles: File[]) => {
     const droppedFile = acceptedFiles[0];
     if (droppedFile) {
-      const isVideo = droppedFile.type.startsWith('video/');
-      const type = isVideo ? 'video' : 'photo';
-      setFileType(type);
+      processFile(droppedFile);
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const currentStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 720 },
+          height: { ideal: 1280 },
+          facingMode: cameraFacing
+        },
+        audio: true
+      });
+      setStream(currentStream);
+      if (videoRef.current) videoRef.current.srcObject = currentStream;
       
-      setFile(droppedFile);
-      setPreview(URL.createObjectURL(droppedFile));
+      const mediaRecorder = new MediaRecorder(currentStream, {
+        mimeType: 'video/webm;codecs=vp9'
+      });
       
-      if (isVideo) {
-        // Get duration
-        const video = document.createElement('video');
-        video.preload = 'metadata';
-        video.onloadedmetadata = () => {
-          setDuration(video.duration);
-          URL.revokeObjectURL(video.src);
-        };
-        video.src = URL.createObjectURL(droppedFile);
-      } else {
-        setDuration(0);
-      }
-
-      handleAnalyze(droppedFile.name, type);
-
-      const startCompressedUpload = async () => {
-        setIsCompressing(isVideo); // Only show compression for video
-        setCompressionProgress(0);
-        
-        try {
-          let fileToUpload = droppedFile;
-          
-          if (isVideo) {
-            // Add a timeout to compression - if it takes more than 15 seconds to even start or show progress, fallback
-            const compressionPromise = compressVideo(droppedFile, (p) => setCompressionProgress(p));
-            const compressionTimeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Compression timeout")), 20000));
-            
-            const compressedBlob = await Promise.race([compressionPromise, compressionTimeoutPromise]) as Blob;
-            fileToUpload = new File([compressedBlob], droppedFile.name, { type: 'video/mp4' });
-          }
-          
-          // Start upload with compressed file (or original if photo)
-          const placeholderUrl = 'https://picsum.photos/seed/placeholder/300/533';
-          
-          const startImmediateUpload = async (thumbBlob: Blob) => {
-            const videoId = await startUpload(fileToUpload, thumbBlob, user, type);
-            setCurrentUploadId(videoId);
-          };
-
-          // Try to get real thumbnail
-          let thumbPromise: Promise<Blob | null>;
-          if (isVideo) {
-            thumbPromise = generateThumbnail(droppedFile).then(async (dataUrl) => {
-              const res = await fetch(dataUrl);
-              return await res.blob();
-            }).catch(() => null);
-          } else {
-            // For photos, the photo itself is the thumbnail
-            thumbPromise = Promise.resolve(droppedFile);
-          }
-
-          const thumbTimeoutPromise = new Promise<null>(resolve => setTimeout(() => resolve(null), 1500));
-
-          Promise.race([thumbPromise, thumbTimeoutPromise]).then(async (blob) => {
-            if (blob) {
-              setThumbnailBlob(blob);
-              startImmediateUpload(blob);
-            } else {
-              const res = await fetch(placeholderUrl);
-              const placeholderBlob = await res.blob();
-              setThumbnailBlob(placeholderBlob);
-              startImmediateUpload(placeholderBlob);
-            }
-          });
-        } catch (error) {
-          console.error("Upload preparation failed, falling back to original", error);
-          // Fallback to original file
-          const placeholderUrl = 'https://picsum.photos/seed/placeholder/300/533';
-          
-          const startImmediateUpload = async (thumbBlob: Blob) => {
-            const videoId = await startUpload(droppedFile, thumbBlob, user, type);
-            setCurrentUploadId(videoId);
-          };
-
-          let fallbackThumbPromise: Promise<Blob | null>;
-          if (isVideo) {
-            fallbackThumbPromise = generateThumbnail(droppedFile).then(async (dataUrl) => {
-              const res = await fetch(dataUrl);
-              return await res.blob();
-            }).catch(() => null);
-          } else {
-            fallbackThumbPromise = Promise.resolve(droppedFile);
-          }
-
-          const fallbackThumbTimeoutPromise = new Promise<null>(resolve => setTimeout(() => resolve(null), 1500));
-
-          Promise.race([fallbackThumbPromise, fallbackThumbTimeoutPromise]).then(async (blob) => {
-            if (blob) {
-              setThumbnailBlob(blob);
-              startImmediateUpload(blob);
-            } else {
-              const res = await fetch(placeholderUrl);
-              const placeholderBlob = await res.blob();
-              setThumbnailBlob(placeholderBlob);
-              startImmediateUpload(placeholderBlob);
-            }
-          });
-        } finally {
-          setIsCompressing(false);
+      mediaRecorderRef.current = mediaRecorder;
+      recordedChunksRef.current = [];
+      
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          recordedChunksRef.current.push(e.data);
         }
       };
+      
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+        const recordedFile = new File([blob], `recorded_reel_${Date.now()}.webm`, { type: 'video/webm' });
+        processFile(recordedFile);
+        
+        // Cleanup stream
+        currentStream.getTracks().forEach(track => track.stop());
+        setStream(null);
+        setIsRecording(false);
+        setRecordingTime(0);
+      };
+      
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(prev => {
+          if (prev >= 60) {
+            stopRecording();
+            return 60;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+      
+    } catch (error) {
+      console.error("Failed to start recording", error);
+      showError("Could not access camera/microphone. Please check permissions.");
+    }
+  };
 
-      startCompressedUpload();
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+    }
+  };
+
+  const toggleCamera = async () => {
+    const newFacing = cameraFacing === 'user' ? 'environment' : 'user';
+    setCameraFacing(newFacing);
+    if (isRecording || stream) {
+      // Restart stream with new facing mode
+      stopRecording();
+      // Wait a bit for cleanup
+      setTimeout(() => startRecording(), 500);
     }
   };
 
@@ -193,14 +341,29 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
     maxFiles: 1
   } as any);
 
-  const handleAnalyze = async (fileName: string, type: 'video' | 'photo') => {
+  const handleAnalyze = async (file: File, type: 'video' | 'photo') => {
     setIsAnalyzing(true);
     try {
-      const result = await analyzeVideoContent(`A ${type} named ${fileName}`);
+      let frames: string[] = [];
+      if (type === 'video') {
+        frames = await extractFrames(file);
+      } else {
+        // For photos, just use the photo itself as a frame
+        const reader = new FileReader();
+        const dataUrl = await new Promise<string>((resolve) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
+        frames = [dataUrl];
+      }
+
+      const result = await analyzeVideoContent(`A ${type} named ${file.name}`, frames);
       setAnalysis(result);
       if (result.isSafe) {
         setCaption(prev => prev || result.caption || '');
         setHashtags(prev => prev || result.hashtags?.map((t: string) => `#${t}`).join(' ') || '');
+      } else {
+        showError(`Safety Warning: ${result.safetyReason || 'Content flagged as inappropriate.'}`);
       }
     } catch (error) {
       console.error("Analysis failed", error);
@@ -209,7 +372,7 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
         isSafe: true,
         caption: '',
         hashtags: [],
-        seoTitle: fileName
+        seoTitle: file.name
       });
     } finally {
       setIsAnalyzing(false);
@@ -218,6 +381,10 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
 
   const handlePublish = () => {
     if (!file) return;
+    if (analysis && !analysis.isSafe) {
+      showError(`Cannot publish: ${analysis.safetyReason || 'Content violates community guidelines.'}`);
+      return;
+    }
     // If analysis hasn't completed or failed, we default to safe to allow upload
     if (!analysis) {
       setAnalysis({ isSafe: true, caption: '', hashtags: [], seoTitle: file.name });
@@ -238,9 +405,10 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
         duration: duration || 0,
         audioTrack: selectedAudio || undefined
       });
+      showSuccess("Reel published successfully!");
     } catch (error) {
       console.error("Publishing failed", error);
-      alert("Failed to publish. Please check your connection.");
+      showError("Failed to publish. Please check your connection.");
       setIsPublishing(false);
     } finally {
       setIsPreparing(false);
@@ -274,9 +442,10 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
       
       // Update in cloud
       await updateThumbnail(currentUploadId, blob, user.uid);
+      showSuccess("Thumbnail updated!");
     } catch (error) {
       console.error("Failed to update thumbnail", error);
-      alert("Failed to update thumbnail. Please try again.");
+      showError("Failed to update thumbnail. Please try again.");
     } finally {
       setIsUpdatingThumb(false);
     }
@@ -395,37 +564,138 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
       </div>
 
       {!file ? (
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          {...getRootProps()} 
-          className={cn(
-            "flex-1 border-2 border-dashed rounded-[40px] flex flex-col items-center justify-center p-10 transition-all duration-500 group cursor-pointer relative overflow-hidden",
-            isDragActive ? "border-rose-500 bg-rose-500/10 scale-[0.98]" : "border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900 hover:border-zinc-700"
-          )}
-        >
-          <input {...getInputProps()} />
-          
-          {isDragActive && (
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="absolute inset-0 bg-rose-500/5 backdrop-blur-[2px] flex items-center justify-center"
-            >
-              <div className="absolute inset-0 border-8 border-rose-500/20 rounded-[40px] animate-pulse" />
-            </motion.div>
-          )}
+        <div className="flex-1 flex flex-col space-y-4">
+          {stream ? (
+            <div className="flex-1 relative rounded-[40px] overflow-hidden bg-black border border-white/10">
+              <video 
+                ref={recordingVideoRef} 
+                autoPlay 
+                playsInline 
+                muted 
+                className="w-full h-full object-cover" 
+              />
+              
+              {/* Recording Controls Overlay */}
+              <div className="absolute inset-0 flex flex-col justify-between p-8">
+                <div className="flex justify-between items-start">
+                  <div className="bg-black/50 backdrop-blur-md px-4 py-2 rounded-full flex items-center space-x-2 border border-white/10">
+                    <div className={cn("w-2 h-2 rounded-full", isRecording ? "bg-rose-500 animate-pulse" : "bg-zinc-500")} />
+                    <span className="text-xs font-black tabular-nums">00:{recordingTime.toString().padStart(2, '0')}</span>
+                  </div>
+                  
+                  <button 
+                    onClick={() => {
+                      stream.getTracks().forEach(t => t.stop());
+                      setStream(null);
+                      setIsRecording(false);
+                    }}
+                    className="p-3 bg-black/50 backdrop-blur-md rounded-full text-white border border-white/10 hover:bg-rose-500 transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
 
-          <div className="relative z-10 flex flex-col items-center">
-            <div className="w-24 h-24 bg-zinc-800 rounded-[32px] flex items-center justify-center mb-8 group-hover:scale-110 group-hover:rotate-3 transition-all duration-500 shadow-2xl border border-white/5">
-              <UploadIcon className={cn("transition-colors duration-300", isDragActive ? "text-white" : "text-rose-500")} size={40} />
+                <div className="flex flex-col items-center space-y-8">
+                  <div className="flex items-center space-x-8">
+                    <button 
+                      onClick={toggleCamera}
+                      className="p-4 bg-black/50 backdrop-blur-md rounded-full text-white border border-white/10 hover:bg-white/10 transition-all"
+                    >
+                      <RefreshCw size={24} />
+                    </button>
+
+                    <button 
+                      onClick={isRecording ? stopRecording : startRecording}
+                      className="relative flex items-center justify-center group"
+                    >
+                      <div className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center">
+                        <div className={cn(
+                          "transition-all duration-300",
+                          isRecording ? "w-8 h-8 bg-rose-500 rounded-sm" : "w-16 h-16 bg-rose-500 rounded-full scale-90 group-hover:scale-100"
+                        )} />
+                      </div>
+                      {isRecording && (
+                        <motion.div 
+                          animate={{ scale: [1, 1.1, 1] }}
+                          transition={{ duration: 2, repeat: Infinity }}
+                          className="absolute -inset-2 border-2 border-rose-500 rounded-full"
+                        />
+                      )}
+                    </button>
+
+                    <div className="w-14" /> {/* Spacer for balance */}
+                  </div>
+                  
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/60">
+                    {isRecording ? "Tap to stop recording" : "Tap to start recording"}
+                  </p>
+                </div>
+              </div>
             </div>
-            <h3 className="text-2xl font-black mb-3 tracking-tighter uppercase italic">Select Video or Photo</h3>
-            <p className="text-center text-zinc-500 text-sm max-w-[240px] font-medium leading-relaxed">
-              Drag & drop your masterpiece here or click to browse files.
-            </p>
-            
-            <div className="mt-12 flex items-center space-x-4">
+          ) : (
+            <>
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex-1"
+              >
+                <div 
+                  {...getRootProps()} 
+                  className={cn(
+                    "h-full border-2 border-dashed rounded-[40px] flex flex-col items-center justify-center p-10 transition-all duration-500 group cursor-pointer relative overflow-hidden",
+                    isDragActive ? "border-rose-500 bg-rose-500/10 scale-[0.98]" : "border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900 hover:border-zinc-700"
+                  )}
+                >
+                  <input {...getInputProps()} />
+                  
+                  {isDragActive && (
+                    <motion.div 
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="absolute inset-0 bg-rose-500/5 backdrop-blur-[2px] flex items-center justify-center"
+                    >
+                      <div className="absolute inset-0 border-8 border-rose-500/20 rounded-[40px] animate-pulse" />
+                    </motion.div>
+                  )}
+
+                  <div className="relative z-10 flex flex-col items-center">
+                    <div className="w-24 h-24 bg-zinc-800 rounded-[32px] flex items-center justify-center mb-8 group-hover:scale-110 group-hover:rotate-3 transition-all duration-500 shadow-2xl border border-white/5">
+                      <UploadIcon className={cn("transition-colors duration-300", isDragActive ? "text-white" : "text-rose-500")} size={40} />
+                    </div>
+                    <h3 className="text-2xl font-black mb-3 tracking-tighter uppercase italic">Select Video or Photo</h3>
+                    <p className="text-center text-zinc-500 text-sm max-w-[240px] font-medium leading-relaxed">
+                      Drag & drop your masterpiece here or click to browse files.
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <button 
+                  onClick={startRecording}
+                  className="bg-zinc-900 border border-white/5 p-6 rounded-[32px] flex flex-col items-center justify-center space-y-3 hover:bg-zinc-800 transition-all group"
+                >
+                  <div className="w-12 h-12 bg-rose-500/10 rounded-2xl flex items-center justify-center text-rose-500 group-hover:scale-110 transition-transform">
+                    <Camera size={24} />
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-widest">Record Video</span>
+                </button>
+
+                <button 
+                  onClick={() => (document.querySelector('input[type="file"]') as HTMLInputElement)?.click()}
+                  className="bg-zinc-900 border border-white/5 p-6 rounded-[32px] flex flex-col items-center justify-center space-y-3 hover:bg-zinc-800 transition-all group"
+                >
+                  <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-500 group-hover:scale-110 transition-transform">
+                    <UploadIcon size={24} />
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-widest">Choose File</span>
+                </button>
+              </div>
+            </>
+          )}
+          
+          {!stream && (
+            <div className="flex items-center justify-center space-x-8 py-4">
               <div className="flex flex-col items-center space-y-1">
                 <div className="w-10 h-10 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center text-zinc-500">
                   <span className="text-[10px] font-black">MP4/JPG</span>
@@ -447,8 +717,8 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
                 <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">AI Scan</span>
               </div>
             </div>
-          </div>
-        </motion.div>
+          )}
+        </div>
       ) : (
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-8 overflow-y-auto custom-scrollbar pb-24">

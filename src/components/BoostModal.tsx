@@ -5,6 +5,7 @@ import { doc, updateDoc, increment, addDoc, collection } from 'firebase/firestor
 import { db } from '../services/firebase';
 import { User, Video, BOOST_PLANS, BoostPlan } from '../types';
 import confetti from 'canvas-confetti';
+import { useError } from '../contexts/ErrorContext';
 
 interface BoostModalProps {
   currentUser: User;
@@ -13,6 +14,7 @@ interface BoostModalProps {
 }
 
 export const BoostModal: React.FC<BoostModalProps> = ({ currentUser, video, onClose }) => {
+  const { showError, showSuccess } = useError();
   const [selectedPlan, setSelectedPlan] = useState<BoostPlan>(BOOST_PLANS[0]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -79,11 +81,11 @@ export const BoostModal: React.FC<BoostModalProps> = ({ currentUser, video, onCl
         origin: { y: 0.6 }
       });
 
-      alert(`Video Boosted Successfully! ${!isOwnVideo ? `The creator has earned ₹${creatorShare} as a boost share.` : ''}`);
+      showSuccess(`Video Boosted Successfully! ${!isOwnVideo ? `The creator has earned ₹${creatorShare} as a boost share.` : ''}`);
       onClose();
     } catch (error) {
       console.error("Boost failed:", error);
-      alert("Failed to boost video");
+      showError("Failed to boost video");
     } finally {
       setIsLoading(false);
     }
