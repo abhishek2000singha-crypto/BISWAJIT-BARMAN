@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Rocket, IndianRupee, Loader2, CreditCard, Sparkles, ArrowRight, CheckCircle2 } from 'lucide-react';
-import { doc, updateDoc, increment, addDoc, collection } from 'firebase/firestore';
+import { doc, updateDoc, increment, addDoc, collection, getDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { User, Video, BOOST_PLANS, BoostPlan } from '../types';
 import confetti from 'canvas-confetti';
 import { useError } from '../contexts/ErrorContext';
+import { sendNotification } from '../services/notificationService';
 
 interface BoostModalProps {
   currentUser: User;
@@ -15,21 +16,42 @@ interface BoostModalProps {
 
 export const BoostModal: React.FC<BoostModalProps> = ({ currentUser, video, onClose }) => {
   const { showError, showSuccess } = useError();
-  const [selectedPlan, setSelectedPlan] = useState<BoostPlan>(BOOST_PLANS[0]);
+  const [selectedPlan, setSelectedPlan] = useState<BoostPlan | { id: string; name: string; price: number; durationDays: number }>(BOOST_PLANS[0]);
+  const [paymentSource, setPaymentSource] = useState<'external' | 'wallet'>('external');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleBoost = async () => {
+    if (paymentSource === 'wallet' && currentUser.walletBalance < selectedPlan.price) {
+      showError("Insufficient wallet balance");
+      return;
+    }
+
     setIsLoading(true);
     try {
-      // In a real app, we would call Razorpay here.
-      // For this implementation, we'll simulate a successful payment.
-      
       const isOwnVideo = currentUser.uid === video.userId;
       const boostAmount = selectedPlan.price;
       const creatorShare = isOwnVideo ? 0 : boostAmount * 0.5; // Creator gets 50% if someone else boosts
       const platformFee = boostAmount - creatorShare;
 
-      // 1. Record boost transaction
+      const boosterRef = doc(db, 'users', currentUser.uid);
+
+      // 1. Deduct from wallet if selected
+      if (paymentSource === 'wallet') {
+        await updateDoc(boosterRef, {
+          walletBalance: increment(-boostAmount)
+        });
+
+        // Record spending transaction for booster
+        await addDoc(collection(db, 'transactions'), {
+          userId: currentUser.uid,
+          type: 'withdrawal', // or 'transfer'
+          amount: boostAmount,
+          description: `Boosted ${video.userName}'s reel`,
+          status: 'completed',
+          source: 'admin_transfer', // or something else
+          createdAt: Date.now()
+        });
+      }
       await addDoc(collection(db, 'boost_transactions'), {
         userId: currentUser.uid,
         videoId: video.id,
@@ -67,6 +89,18 @@ export const BoostModal: React.FC<BoostModalProps> = ({ currentUser, video, onCl
           status: 'completed',
           source: 'boost_share',
           createdAt: Date.now()
+        });
+
+        // Send notification to creator
+        sendNotification({
+          userId: video.userId,
+          senderId: currentUser.uid,
+          senderName: currentUser.name,
+          senderProfileImage: currentUser.profileImage,
+          type: 'boost',
+          videoId: video.id,
+          videoThumbnail: video.thumbnailUrl || video.videoUrl,
+          message: `boosted your reel! You earned ₹${creatorShare} as a boost share.`
         });
       }
 
@@ -128,6 +162,37 @@ export const BoostModal: React.FC<BoostModalProps> = ({ currentUser, video, onCl
 
         <div className="space-y-6">
           <div className="grid grid-cols-1 gap-3">
+            {video.customBoostPrice && (
+              <button 
+                onClick={() => setSelectedPlan({ id: 'custom', name: "Creator's Preferred Boost", price: video.customBoostPrice!, durationDays: 3 })}
+                className={`p-5 rounded-3xl border-2 transition-all text-left relative overflow-hidden group flex items-center justify-between ${
+                  selectedPlan.id === 'custom' 
+                    ? 'border-emerald-500 bg-emerald-500/10' 
+                    : 'border-white/5 bg-white/5 hover:border-white/10'
+                }`}
+              >
+                <div className="flex items-center space-x-4">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                    selectedPlan.id === 'custom' ? 'bg-emerald-500 text-white' : 'bg-zinc-800 text-zinc-500'
+                  }`}>
+                    <Sparkles size={20} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-white">Creator's Custom Boost</p>
+                    <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">3 Days Duration</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-lg font-black text-white">₹{video.customBoostPrice}</p>
+                  {selectedPlan.id === 'custom' && (
+                    <div className="flex items-center justify-end text-emerald-500">
+                      <CheckCircle2 size={14} />
+                    </div>
+                  )}
+                </div>
+              </button>
+            )}
+
             {BOOST_PLANS.map(plan => (
               <button 
                 key={plan.id}
@@ -159,6 +224,39 @@ export const BoostModal: React.FC<BoostModalProps> = ({ currentUser, video, onCl
                 </div>
               </button>
             ))}
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Payment Method</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button 
+                onClick={() => setPaymentSource('external')}
+                className={`p-4 rounded-2xl border-2 transition-all text-left ${
+                  paymentSource === 'external' 
+                    ? 'border-rose-500 bg-rose-500/10' 
+                    : 'border-white/5 bg-white/5'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <CreditCard size={14} className={paymentSource === 'external' ? 'text-rose-500' : 'text-zinc-500'} />
+                </div>
+                <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Card / UPI</p>
+              </button>
+              <button 
+                onClick={() => setPaymentSource('wallet')}
+                className={`p-4 rounded-2xl border-2 transition-all text-left ${
+                  paymentSource === 'wallet' 
+                    ? 'border-emerald-500 bg-emerald-500/10' 
+                    : 'border-white/5 bg-white/5'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <IndianRupee size={14} className={paymentSource === 'wallet' ? 'text-emerald-500' : 'text-zinc-500'} />
+                  <span className="text-[10px] font-black text-white">₹{currentUser.walletBalance}</span>
+                </div>
+                <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Wallet</p>
+              </button>
+            </div>
           </div>
 
           <div className="bg-zinc-900/50 border border-white/5 p-4 rounded-2xl flex items-start space-x-3">

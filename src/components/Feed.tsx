@@ -5,16 +5,17 @@ import { VideoCard } from './VideoCard';
 import { Video, User } from '../types';
 import { LogoText } from './Logo';
 import { cn } from '../utils';
-import { Loader2, RefreshCcw } from 'lucide-react';
+import { Loader2, RefreshCcw, Search } from 'lucide-react';
 import { useError } from '../contexts/ErrorContext';
 
 export const Feed: React.FC<{ 
   currentUser: User | null, 
   onUserClick?: (uid: string) => void,
+  onNavigateToDiscover?: () => void,
   initialVideoId?: string,
   isMuted?: boolean,
   onMuteToggle?: () => void
-}> = ({ currentUser, onUserClick, initialVideoId, isMuted = true, onMuteToggle }) => {
+}> = ({ currentUser, onUserClick, onNavigateToDiscover, initialVideoId, isMuted = true, onMuteToggle }) => {
   const { showError } = useError();
   const [videos, setVideos] = useState<Video[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -23,7 +24,35 @@ export const Feed: React.FC<{
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [isRestored, setIsRestored] = useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
+
+  // Save active index to localStorage
+  useEffect(() => {
+    if (videos.length > 0 && !initialVideoId) {
+      localStorage.setItem(`reel_last_index_${feedType}`, activeIndex.toString());
+    }
+  }, [activeIndex, videos.length, initialVideoId, feedType]);
+
+  // Restore active index on initial load
+  useEffect(() => {
+    if (!isRestored && videos.length > 0 && !initialVideoId && containerRef.current) {
+      const savedIndex = localStorage.getItem(`reel_last_index_${feedType}`);
+      if (savedIndex) {
+        const index = parseInt(savedIndex);
+        if (index > 0 && index < videos.length) {
+          setActiveIndex(index);
+          containerRef.current.scrollTo({
+            top: index * containerRef.current.clientHeight,
+            behavior: 'auto'
+          });
+        }
+      }
+      setIsRestored(true);
+    } else if (initialVideoId && videos.length > 0) {
+      setIsRestored(true);
+    }
+  }, [videos, isRestored, initialVideoId, feedType]);
 
   useEffect(() => {
     if (currentUser && feedType === 'following') {
@@ -105,6 +134,13 @@ export const Feed: React.FC<{
         ((v.totalWatchTime || 0) / 60) * 5 // 5 points per minute watched
       ) / Math.pow(ageInHours + 2, 1.1);
 
+      // 2.1 Negative Feedback Penalty
+      // We penalize videos with high skip or report rates
+      const negativeScore = (
+        (v.skipsCount || 0) * 15 +
+        (v.reportsCount || 0) * 100
+      );
+
       // 3. Personalization: Creator Affinity
       const creatorScore = (userInterests[v.userId] || 0) * 12;
       
@@ -132,7 +168,8 @@ export const Feed: React.FC<{
 
       const totalScore = 
         recencyScore + 
-        engagementScore + 
+        engagementScore - 
+        negativeScore +
         creatorScore + 
         hashtagScore + 
         followScore + 
@@ -175,7 +212,8 @@ export const Feed: React.FC<{
           setLoading(false);
           return;
         }
-        constraints.push(where('userId', 'in', followingIds.slice(0, 10)));
+        // Firestore 'in' query limit is 30
+        constraints.push(where('userId', 'in', followingIds.slice(0, 30)));
       }
 
       if (!isInitial && lastDoc) {
@@ -230,6 +268,7 @@ export const Feed: React.FC<{
   useEffect(() => {
     setLastDoc(null);
     setHasMore(true);
+    setIsRestored(false);
     loadVideos(true);
   }, [feedType, followingIds, initialVideoId]);
 
@@ -285,21 +324,62 @@ export const Feed: React.FC<{
         onScroll={handleScroll}
         className="h-full w-full overflow-y-scroll snap-y snap-mandatory scrollbar-hide"
       >
-        {videos.length === 0 && !loading ? (
+        {videos.length === 0 && loading ? (
+          <div className="h-full w-full bg-black flex flex-col items-center justify-center">
+            <div className="w-full h-full bg-zinc-900/10 animate-pulse relative">
+              <div className="absolute bottom-24 left-6 space-y-4 w-2/3">
+                <div className="flex items-center space-x-3">
+                  <div className="w-12 h-12 bg-zinc-800 rounded-full" />
+                  <div className="h-4 bg-zinc-800 rounded-full w-32" />
+                </div>
+                <div className="h-3 bg-zinc-800 rounded-full w-full" />
+                <div className="h-3 bg-zinc-800 rounded-full w-3/4" />
+                <div className="h-8 bg-zinc-800 rounded-2xl w-40" />
+              </div>
+              <div className="absolute right-4 bottom-24 space-y-8">
+                {[1,2,3,4,5].map(i => (
+                  <div key={i} className="flex flex-col items-center space-y-2">
+                    <div className="w-12 h-12 bg-zinc-800 rounded-full" />
+                    <div className="h-2 bg-zinc-800 rounded-full w-6" />
+                  </div>
+                ))}
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Loader2 className="animate-spin text-zinc-800" size={48} />
+              </div>
+            </div>
+          </div>
+        ) : videos.length === 0 && !loading ? (
           <div className="h-full w-full flex flex-col items-center justify-center text-zinc-500 space-y-6 p-8 text-center">
             <div className="w-20 h-20 bg-zinc-900 rounded-full flex items-center justify-center animate-pulse border border-white/5">
               <LogoText className="opacity-20" />
             </div>
-            <div>
-              <p className="text-sm font-bold text-white mb-2">No reels found</p>
-              <p className="text-xs text-zinc-500">Be the first to upload or check your connection.</p>
-            </div>
+            {feedType === 'following' ? (
+              <div>
+                <p className="text-sm font-bold text-white mb-2">Not following anyone yet</p>
+                <p className="text-xs text-zinc-500">Follow your favorite creators to see their latest reels here.</p>
+              </div>
+            ) : (
+              <div>
+                <p className="text-sm font-bold text-white mb-2">No reels found</p>
+                <p className="text-xs text-zinc-500">Be the first to upload or check your connection.</p>
+              </div>
+            )}
             <button 
-              onClick={() => loadVideos(true)}
+              onClick={() => feedType === 'following' ? onNavigateToDiscover?.() : loadVideos(true)}
               className="bg-zinc-900 border border-white/10 px-6 py-3 rounded-2xl text-xs font-bold uppercase tracking-widest flex items-center space-x-2 hover:bg-zinc-800 transition-all"
             >
-              <RefreshCcw size={14} />
-              <span>Retry Load</span>
+              {feedType === 'following' ? (
+                <>
+                  <Search size={14} />
+                  <span>Discover Creators</span>
+                </>
+              ) : (
+                <>
+                  <RefreshCcw size={14} />
+                  <span>Retry Load</span>
+                </>
+              )}
             </button>
           </div>
         ) : (

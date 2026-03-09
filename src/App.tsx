@@ -26,7 +26,14 @@ export default function App() {
   const [initialVideoId, setInitialVideoId] = useState<string | null>(null);
   const [isDraggingGlobal, setIsDraggingGlobal] = useState(false);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
-  const [isMuted, setIsMuted] = useState(true);
+  const [isMuted, setIsMuted] = useState(() => {
+    const saved = localStorage.getItem('reel_muted');
+    return saved !== null ? JSON.parse(saved) : true;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('reel_muted', JSON.stringify(isMuted));
+  }, [isMuted]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -85,38 +92,45 @@ export default function App() {
     let unsubscribeSnapshot: () => void;
     let unsubscribeNotifications: () => void;
 
+    // Safety timeout: If Firebase doesn't respond in 5 seconds, stop initializing
+    const safetyTimeout = setTimeout(() => {
+      if (initializing) {
+        console.warn("Firebase initialization timed out. Proceeding to app.");
+        setInitializing(false);
+      }
+    }, 5000);
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      clearTimeout(safetyTimeout);
       if (firebaseUser) {
         const userRef = doc(db, 'users', firebaseUser.uid);
         
-        // Initial check/creation
-        const userDoc = await getDoc(userRef);
-        if (!userDoc.exists()) {
-          const newUser = {
-            uid: firebaseUser.uid,
-            name: firebaseUser.displayName || `User_${firebaseUser.uid.slice(0, 5)}`,
-            mobile: firebaseUser.phoneNumber || '',
-            profileImage: firebaseUser.photoURL || 'https://picsum.photos/seed/me/200/200',
-            followersCount: 0,
-            followingCount: 0,
-            totalLikes: 0,
-            totalViews: 0,
-            role: 'user',
-            monetizationStatus: 'none',
-            policyViolations: 0,
-            walletBalance: 0,
-            superChatBalance: 0,
-            bio: '',
-            website: '',
-            socialLinks: {
-              instagram: '',
-              twitter: '',
-              youtube: ''
-            },
-            createdAt: Date.now()
-          };
-          await setDoc(userRef, newUser);
-          setUser(newUser);
+        // Initial check
+        let userDoc;
+        try {
+          userDoc = await getDoc(userRef);
+          if (!userDoc.exists()) {
+            // Check localStorage fallback
+            const storedUser = localStorage.getItem(`demo_user_${firebaseUser.uid}`);
+            if (storedUser) {
+              setUser(JSON.parse(storedUser));
+            } else {
+              console.warn("User document not found for authenticated user.");
+              setUser(null);
+              return;
+            }
+          } else {
+            setUser(userDoc.data());
+          }
+        } catch (err) {
+          console.warn("Firestore check failed in App.tsx, checking localStorage:", err);
+          const storedUser = localStorage.getItem(`demo_user_${firebaseUser.uid}`);
+          if (storedUser) {
+            setUser(JSON.parse(storedUser));
+          } else {
+            setUser(null);
+            return;
+          }
         }
 
         // Real-time listener
@@ -216,6 +230,7 @@ export default function App() {
             setViewingProfileId(uid);
             setActiveTab('profile');
           }} 
+          onNavigateToDiscover={() => setActiveTab('discover')}
         />
       );
       case 'discover': return (

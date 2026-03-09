@@ -28,6 +28,15 @@ export const db = initializeFirestore(app, {
 });
 export const storage = getStorage(app);
 
+const API_KEY = import.meta.env.VITE_FIREBASE_API_KEY;
+export const isDemoMode = !API_KEY || 
+  API_KEY === "dummy_key" || 
+  API_KEY.includes("YOUR_") || 
+  API_KEY.includes("API_KEY") ||
+  API_KEY === "undefined" ||
+  API_KEY === "null" ||
+  API_KEY.length < 20; // Real Firebase API keys are typically ~39 chars
+
 // Increase retry limits for better resilience on unstable networks
 storage.maxUploadRetryTime = 1200000; // 20 minutes
 storage.maxOperationRetryTime = 1200000; // 20 minutes

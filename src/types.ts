@@ -57,8 +57,11 @@ export interface Video {
   commentsCount: number;
   sharesCount: number;
   viewsCount: number;
+  skipsCount?: number;
+  reportsCount?: number;
   boosted: boolean;
   boostExpiry: number | null;
+  customBoostPrice?: number;
   duration?: number;
   totalWatchTime?: number;
   audioTrack?: AudioTrack;
@@ -142,7 +145,7 @@ export interface Notification {
   senderId: string; // The user who triggered the notification
   senderName: string;
   senderProfileImage: string;
-  type: 'like' | 'comment' | 'follow' | 'monetization' | 'system';
+  type: 'like' | 'comment' | 'follow' | 'monetization' | 'tip' | 'boost' | 'share' | 'system';
   videoId?: string;
   videoThumbnail?: string;
   message: string;

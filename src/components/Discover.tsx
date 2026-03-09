@@ -144,57 +144,83 @@ export const Discover: React.FC<DiscoverProps> = ({ currentUser, onUserClick, on
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery]);
 
+  const [followingUsers, setFollowingUsers] = useState<User[]>([]);
+  const [isFollowingUsersLoading, setIsFollowingUsersLoading] = useState(false);
+
   useEffect(() => {
-    const fetchDiscoverData = async () => {
-      setIsLoading(true);
-      try {
-        // Trending Videos (by views)
-        const trendingQuery = query(
-          collection(db, 'videos'),
-          where('status', '==', 'ready'),
-          orderBy('boosted', 'desc'),
-          orderBy('viewsCount', 'desc'),
-          limit(6)
-        );
-        const unsubTrending = onSnapshot(trendingQuery, (snapshot) => {
-          setTrendingVideos(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Video)));
-        });
+    if (currentUser && followingIds.size > 0) {
+      const fetchFollowingUsers = async () => {
+        setIsFollowingUsersLoading(true);
+        try {
+          const ids = Array.from(followingIds).slice(0, 10);
+          const users = await Promise.all(
+            ids.map(async (id) => {
+              const userDoc = await getDocs(query(collection(db, 'users'), where('__name__', '==', id)));
+              if (!userDoc.empty) {
+                return { ...userDoc.docs[0].data(), uid: userDoc.docs[0].id } as User;
+              }
+              return null;
+            })
+          );
+          setFollowingUsers(users.filter((u): u is User => u !== null));
+        } catch (error) {
+          console.error("Error fetching following users:", error);
+        } finally {
+          setIsFollowingUsersLoading(false);
+        }
+      };
+      fetchFollowingUsers();
+    } else {
+      setFollowingUsers([]);
+    }
+  }, [currentUser, followingIds]);
+  useEffect(() => {
+    setIsLoading(true);
+    try {
+      // Trending Videos (by views)
+      const trendingQuery = query(
+        collection(db, 'videos'),
+        where('status', '==', 'ready'),
+        orderBy('boosted', 'desc'),
+        orderBy('viewsCount', 'desc'),
+        limit(6)
+      );
+      const unsubTrending = onSnapshot(trendingQuery, (snapshot) => {
+        setTrendingVideos(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Video)));
+      });
 
-        // Popular Creators (by followers)
-        const creatorsQuery = query(
-          collection(db, 'users'),
-          orderBy('followersCount', 'desc'),
-          limit(10)
-        );
-        const unsubCreators = onSnapshot(creatorsQuery, (snapshot) => {
-          setPopularCreators(snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id } as User)));
-        });
+      // Popular Creators (by followers)
+      const creatorsQuery = query(
+        collection(db, 'users'),
+        orderBy('followersCount', 'desc'),
+        limit(10)
+      );
+      const unsubCreators = onSnapshot(creatorsQuery, (snapshot) => {
+        setPopularCreators(snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id } as User)));
+      });
 
-        // New Content
-        const newQuery = query(
-          collection(db, 'videos'),
-          where('status', '==', 'ready'),
-          orderBy('createdAt', 'desc'),
-          limit(12)
-        );
-        const unsubNew = onSnapshot(newQuery, (snapshot) => {
-          setNewVideos(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Video)));
-        });
+      // New Content
+      const newQuery = query(
+        collection(db, 'videos'),
+        where('status', '==', 'ready'),
+        orderBy('createdAt', 'desc'),
+        limit(12)
+      );
+      const unsubNew = onSnapshot(newQuery, (snapshot) => {
+        setNewVideos(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Video)));
+      });
 
-        setIsLoading(false);
-        return () => {
-          unsubTrending();
-          unsubCreators();
-          unsubNew();
-        };
-      } catch (error) {
-        console.error("Error fetching discover data:", error);
-        showError("Failed to load discover content.");
-        setIsLoading(false);
-      }
-    };
-
-    fetchDiscoverData();
+      setIsLoading(false);
+      return () => {
+        unsubTrending();
+        unsubCreators();
+        unsubNew();
+      };
+    } catch (error) {
+      console.error("Error fetching discover data:", error);
+      showError("Failed to load discover content.");
+      setIsLoading(false);
+    }
   }, []);
 
   if (isLoading) {
@@ -309,6 +335,36 @@ export const Discover: React.FC<DiscoverProps> = ({ currentUser, onUserClick, on
           </div>
         ) : (
           <>
+            {/* Following Section */}
+            {currentUser && followingUsers.length > 0 && (
+              <section className="animate-in fade-in slide-in-from-left-4">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center space-x-2">
+                    <div className="bg-rose-500/10 p-2 rounded-xl">
+                      <Heart className="text-rose-500" size={20} />
+                    </div>
+                    <h2 className="text-xl font-black uppercase tracking-tight italic">Following</h2>
+                  </div>
+                </div>
+                
+                <div className="flex space-x-4 overflow-x-auto pb-4 scrollbar-hide">
+                  {followingUsers.map((followedUser) => (
+                    <motion.div 
+                      key={followedUser.uid}
+                      whileHover={{ scale: 1.05 }}
+                      onClick={() => onUserClick(followedUser.uid)}
+                      className="flex flex-col items-center space-y-2 min-w-[80px] cursor-pointer group"
+                    >
+                      <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-rose-500 p-0.5">
+                        <img src={followedUser.profileImage} alt={followedUser.name} className="w-full h-full rounded-full object-cover" />
+                      </div>
+                      <p className="text-[10px] font-black text-white truncate max-w-[70px]">@{followedUser.name}</p>
+                    </motion.div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {/* Popular Creators Section */}
         <section>
           <div className="flex items-center justify-between mb-6">

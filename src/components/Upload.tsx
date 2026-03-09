@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload as UploadIcon, X, Sparkles, AlertTriangle, CheckCircle2, Loader2, Eye, Music, Camera, Mic, StopCircle, Circle, RefreshCw } from 'lucide-react';
+import { Upload as UploadIcon, X, Sparkles, AlertTriangle, CheckCircle2, Loader2, Eye, Music, Camera, Mic, StopCircle, Circle, RefreshCw, Play, Rocket } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
 import { analyzeVideoContent } from '../services/geminiService';
@@ -87,6 +87,7 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
   const [currentUploadId, setCurrentUploadId] = useState<string | null>(null);
   const [caption, setCaption] = useState('');
   const [hashtags, setHashtags] = useState('');
+  const [customBoostPrice, setCustomBoostPrice] = useState<string>('');
   const [selectedAudio, setSelectedAudio] = useState<AudioTrack | null>(null);
   const [thumbnailBlob, setThumbnailBlob] = useState<Blob | null>(null);
   const [thumbnailPreviewUrl, setThumbnailPreviewUrl] = useState<string | null>(null);
@@ -94,6 +95,8 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
   const [showPreview, setShowPreview] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [isPlayingSelectedAudio, setIsPlayingSelectedAudio] = useState(false);
+  const audioPreviewRef = useRef<HTMLAudioElement | null>(null);
   const [fileType, setFileType] = useState<'video' | 'photo'>('video');
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -102,6 +105,30 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<any>(null);
   const [cameraFacing, setCameraFacing] = useState<'user' | 'environment'>('user');
+
+  useEffect(() => {
+    if (selectedAudio && isPlayingSelectedAudio) {
+      if (!audioPreviewRef.current) {
+        audioPreviewRef.current = new Audio(selectedAudio.url);
+        audioPreviewRef.current.onended = () => setIsPlayingSelectedAudio(false);
+      } else {
+        audioPreviewRef.current.src = selectedAudio.url;
+      }
+      audioPreviewRef.current.play().catch(err => {
+        console.error("Audio preview failed", err);
+        setIsPlayingSelectedAudio(false);
+      });
+    } else if (audioPreviewRef.current) {
+      audioPreviewRef.current.pause();
+    }
+
+    return () => {
+      if (audioPreviewRef.current) {
+        audioPreviewRef.current.pause();
+        audioPreviewRef.current = null;
+      }
+    };
+  }, [selectedAudio, isPlayingSelectedAudio]);
 
   const currentUpload = uploads.find(u => u.id === currentUploadId);
 
@@ -392,6 +419,25 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
     setShowConfirmModal(true);
   };
 
+  const resetForm = () => {
+    setFile(null);
+    setPreview(null);
+    setCaption('');
+    setHashtags('');
+    setDuration(0);
+    setSelectedAudio(null);
+    setCurrentUploadId(null);
+    setAnalysis(null);
+    setThumbnailBlob(null);
+    setThumbnailPreviewUrl(null);
+    setShowPreview(false);
+    setIsPublishing(false);
+    setIsPreparing(false);
+    setIsAnalyzing(false);
+    setRecordingTime(0);
+    setIsRecording(false);
+  };
+
   const executePublish = async () => {
     if (!file || !currentUploadId) return;
     setShowConfirmModal(false);
@@ -403,12 +449,14 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
         caption: caption || 'New Reel',
         hashtags: hashtags || '',
         duration: duration || 0,
-        audioTrack: selectedAudio || undefined
+        audioTrack: selectedAudio || undefined,
+        customBoostPrice: customBoostPrice ? parseFloat(customBoostPrice) : undefined
       });
       showSuccess("Reel published successfully!");
-    } catch (error) {
+      resetForm();
+    } catch (error: any) {
       console.error("Publishing failed", error);
-      showError("Failed to publish. Please check your connection.");
+      showError(error.message || "Failed to publish. Please check your connection.");
       setIsPublishing(false);
     } finally {
       setIsPreparing(false);
@@ -1083,14 +1131,40 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
                 <div className="space-y-3">
                   <div className="flex items-center justify-between px-2">
                     <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Background Music</label>
-                    {selectedAudio && (
-                      <button 
-                        onClick={() => setSelectedAudio(null)}
-                        className="text-[10px] text-rose-500 font-bold uppercase tracking-widest hover:underline"
-                      >
-                        Remove
-                      </button>
-                    )}
+                    <div className="flex items-center space-x-4">
+                      {selectedAudio && (
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsPlayingSelectedAudio(!isPlayingSelectedAudio);
+                          }}
+                          className="text-[10px] text-rose-500 font-bold uppercase tracking-widest hover:underline flex items-center space-x-1"
+                        >
+                          {isPlayingSelectedAudio ? (
+                            <>
+                              <StopCircle size={12} />
+                              <span>Stop Preview</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play size={12} />
+                              <span>Preview</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                      {selectedAudio && (
+                        <button 
+                          onClick={() => {
+                            setSelectedAudio(null);
+                            setIsPlayingSelectedAudio(false);
+                          }}
+                          className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest hover:underline"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <button 
                     onClick={() => setShowAudioLibrary(true)}
@@ -1139,6 +1213,30 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
                       className="w-full bg-zinc-900/80 border border-white/5 rounded-[24px] p-5 text-sm focus:outline-none focus:border-rose-500/50 transition-all placeholder:text-zinc-700 group-hover:border-white/10"
                       placeholder="#trending #viral #reels"
                     />
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900/50 border border-white/5 rounded-[32px] p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 bg-rose-500/10 rounded-xl flex items-center justify-center text-rose-500">
+                        <Rocket size={20} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-widest text-white">Boost Price</p>
+                        <p className="text-[8px] text-zinc-500 font-bold uppercase tracking-widest mt-0.5">Set price for others to boost your reel</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2 bg-zinc-950 px-4 py-2 rounded-2xl border border-white/5">
+                      <span className="text-rose-500 font-black">₹</span>
+                      <input 
+                        type="number"
+                        value={customBoostPrice}
+                        onChange={(e) => setCustomBoostPrice(e.target.value)}
+                        placeholder="0"
+                        className="bg-transparent w-16 text-sm font-black text-white focus:outline-none text-right"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1223,6 +1321,14 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
                         <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest mb-1">Audio</p>
                         <p className="text-xs text-white font-bold truncate">
                           {selectedAudio.title}
+                        </p>
+                      </div>
+                    )}
+                    {customBoostPrice && (
+                      <div className="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl">
+                        <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-1">Boost Price</p>
+                        <p className="text-xs text-white font-bold truncate">
+                          ₹{customBoostPrice}
                         </p>
                       </div>
                     )}

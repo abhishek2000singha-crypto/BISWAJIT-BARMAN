@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, MessageCircle, UserPlus, DollarSign, Bell, X, Trash2, CheckCircle2 } from 'lucide-react';
+import { Heart, MessageCircle, UserPlus, DollarSign, Bell, X, Trash2, CheckCircle2, Gift, Rocket, Sparkles, Share2 } from 'lucide-react';
 import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { Notification } from '../types';
@@ -73,6 +73,10 @@ export const Notifications: React.FC<NotificationsProps> = ({ userId, onUserClic
       case 'comment': return <MessageCircle className="text-blue-500" size={16} />;
       case 'follow': return <UserPlus className="text-emerald-500" size={16} />;
       case 'monetization': return <DollarSign className="text-amber-500" size={16} />;
+      case 'tip': return <Gift className="text-amber-500" size={16} />;
+      case 'boost': return <Rocket className="text-rose-500" size={16} />;
+      case 'share': return <Share2 className="text-indigo-500" size={16} />;
+      case 'system': return <Sparkles className="text-indigo-500" size={16} />;
       default: return <Bell className="text-zinc-400" size={16} />;
     }
   };
@@ -128,7 +132,9 @@ export const Notifications: React.FC<NotificationsProps> = ({ userId, onUserClic
                   "group relative p-4 rounded-[24px] border transition-all duration-300",
                   notification.read 
                     ? "bg-zinc-900/30 border-white/5 opacity-60" 
-                    : "bg-zinc-900 border-rose-500/20 shadow-[0_0_20px_rgba(244,63,94,0.05)]"
+                    : notification.type === 'tip' || notification.type === 'boost'
+                      ? "bg-zinc-900 border-amber-500/30 shadow-[0_0_20px_rgba(245,158,11,0.1)]"
+                      : "bg-zinc-900 border-rose-500/20 shadow-[0_0_20px_rgba(244,63,94,0.05)]"
                 )}
                 onClick={() => !notification.read && markAsRead(notification.id)}
               >

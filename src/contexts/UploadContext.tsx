@@ -15,12 +15,14 @@ interface UploadJob {
   videoUrl?: string;
   thumbnailUrl?: string;
   task?: UploadTask;
+  metadata?: { caption: string; hashtags: string; duration?: number; audioTrack?: AudioTrack; customBoostPrice?: number };
+  isFinalized?: boolean;
 }
 
 interface UploadContextType {
   uploads: UploadJob[];
   startUpload: (file: File, thumbnailBlob: Blob, user: User, type: 'video' | 'photo') => Promise<string>;
-  finalizeUpload: (id: string, user: User, metadata: { caption: string; hashtags: string; duration?: number; audioTrack?: AudioTrack }) => Promise<void>;
+  finalizeUpload: (id: string, user: User, metadata: { caption: string; hashtags: string; duration?: number; audioTrack?: AudioTrack; customBoostPrice?: number }) => Promise<void>;
   updateThumbnail: (id: string, thumbnailBlob: Blob, userId: string) => Promise<void>;
   removeUpload: (id: string) => void;
 }
@@ -29,6 +31,81 @@ const UploadContext = createContext<UploadContextType | undefined>(undefined);
 
 export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [uploads, setUploads] = useState<UploadJob[]>([]);
+
+  const saveToFirestore = useCallback(async (id: string, user: User, job: UploadJob, metadata: { caption: string; hashtags: string; duration?: number; audioTrack?: AudioTrack; customBoostPrice?: number }) => {
+    if (!job.videoUrl || !job.thumbnailUrl) return;
+
+    setUploads(prev => prev.map(u => u.id === id ? { ...u, stage: 'saving' } : u));
+    
+    const videoData = {
+      videoUrl: job.videoUrl,
+      thumbnailUrl: job.thumbnailUrl,
+      caption: metadata.caption || (job.type === 'video' ? 'New Reel' : 'New Post'),
+      hashtags: (metadata.hashtags || '').split(' ').filter(t => t.startsWith('#')).map(t => t.slice(1)),
+      duration: metadata.duration || 0,
+      audioTrack: metadata.audioTrack || null,
+      customBoostPrice: metadata.customBoostPrice || null,
+      status: job.type === 'photo' ? 'ready' as const : 'processing' as const,
+      updatedAt: Date.now()
+    };
+
+    // Retry Firestore update with exponential backoff
+    let saveSuccess = false;
+    let saveAttempts = 0;
+    const videoRef_fs = doc(db, 'videos', id);
+    
+    while (!saveSuccess && saveAttempts < 5) {
+      try {
+        await updateDoc(videoRef_fs, videoData);
+        saveSuccess = true;
+      } catch (e) {
+        saveAttempts++;
+        console.warn(`Firestore update attempt ${saveAttempts} failed, retrying...`, e);
+        await new Promise(r => setTimeout(r, Math.pow(2, saveAttempts) * 500));
+      }
+    }
+
+    if (!saveSuccess) throw new Error("Could not save video to your profile. Please check your connection.");
+
+    // Trigger Transcoding - Only for Videos
+    if (job.type === 'video') {
+      try {
+        setUploads(prev => prev.map(u => u.id === id ? { ...u, stage: 'transcoding' } : u));
+        const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+        
+        const response = await fetch(`${apiBase}/api/videos/transcode`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoId: id, videoUrl: job.videoUrl })
+        }).catch(() => null);
+        
+        if (!response || !response.ok) {
+          console.warn("Transcoding trigger failed or backend unavailable. Setting status to ready.");
+          await updateDoc(videoRef_fs, { 
+            status: 'ready',
+            updatedAt: Date.now()
+          });
+        }
+      } catch (e) {
+        console.warn("Transcoding trigger failed, attempting fallback to ready status.", e);
+        try {
+          await updateDoc(videoRef_fs, { 
+            status: 'ready',
+            updatedAt: Date.now()
+          });
+        } catch (fallbackErr) {
+          console.error("Fallback to ready status failed:", fallbackErr);
+        }
+      }
+    }
+
+    setUploads(prev => prev.map(u => u.id === id ? { ...u, status: 'completed', progress: 100, stage: 'done' } : u));
+    
+    // Keep the success state visible for a bit then remove
+    setTimeout(() => {
+      setUploads(prev => prev.filter(u => u.id !== id));
+    }, 8000);
+  }, []);
 
   const startUpload = useCallback(async (
     file: File, 
@@ -132,7 +209,17 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               getDownloadURL(thumbRef).catch(() => "https://picsum.photos/seed/fallback/300/533")
             ]);
             
-            setUploads(prev => prev.map(u => u.id === id ? { ...u, videoUrl, thumbnailUrl, progress: 100, stage: 'processing' } : u));
+            setUploads(prev => {
+              const job = prev.find(u => u.id === id);
+              const updated: UploadJob[] = prev.map(u => u.id === id ? { ...u, videoUrl, thumbnailUrl, progress: 100, stage: 'processing' as const } : u);
+              
+              if (job?.isFinalized && job.metadata) {
+                // If user already clicked publish, save to firestore now
+                saveToFirestore(id, user, { ...job, videoUrl, thumbnailUrl, stage: 'processing' as const }, job.metadata);
+              }
+              
+              return updated;
+            });
           } catch (error: any) {
             console.error("Post-upload processing failed:", error);
             setUploads(prev => prev.map(u => u.id === id ? { ...u, status: 'error', error: "Finalizing failed: " + error.message } : u));
@@ -146,126 +233,26 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return videoId;
   }, []);
 
-  const finalizeUpload = useCallback(async (id: string, user: User, metadata: { caption: string; hashtags: string; duration?: number; audioTrack?: AudioTrack }) => {
-    // Poll for URLs if not ready
-    let isReady = false;
-    let attempts = 0;
-    const maxAttempts = 240; // Increase to 2 minutes (120s / 0.5s = 240)
-    
-    while (!isReady && attempts < maxAttempts) {
-      const currentJob = await new Promise<UploadJob | undefined>(resolve => {
-        setUploads(prev => {
-          const job = prev.find(u => u.id === id);
-          resolve(job);
-          return prev;
-        });
+  const finalizeUpload = useCallback(async (id: string, user: User, metadata: { caption: string; hashtags: string; duration?: number; audioTrack?: AudioTrack; customBoostPrice?: number }) => {
+    const currentJob = await new Promise<UploadJob | undefined>(resolve => {
+      setUploads(prev => {
+        const job = prev.find(u => u.id === id);
+        resolve(job);
+        return prev;
       });
+    });
 
-      if (!currentJob) throw new Error("Upload job not found");
-      
-      // If stuck at 1% for too long, we might want to alert the user or try to recover
-      // But for now, let's just keep waiting as long as status is 'uploading'
-      if (currentJob.status === 'error') throw new Error(currentJob.error || "Upload failed");
-      
-      if (currentJob.videoUrl && currentJob.thumbnailUrl) {
-        setUploads(prev => prev.map(u => u.id === id ? { ...u, stage: 'saving' } : u));
-        const videoData = {
-          videoUrl: currentJob.videoUrl,
-          thumbnailUrl: currentJob.thumbnailUrl,
-          caption: metadata.caption || (currentJob.type === 'video' ? 'New Reel' : 'New Post'),
-          hashtags: (metadata.hashtags || '').split(' ').filter(t => t.startsWith('#')).map(t => t.slice(1)),
-          duration: metadata.duration || 0,
-          audioTrack: metadata.audioTrack || null,
-          status: currentJob.type === 'photo' ? 'ready' as const : 'processing' as const,
-          updatedAt: Date.now()
-        };
+    if (!currentJob) throw new Error("Upload job not found");
 
-        // Retry Firestore update with exponential backoff
-        let saveSuccess = false;
-        let saveAttempts = 0;
-        const videoRef_fs = doc(db, 'videos', id);
-        
-        while (!saveSuccess && saveAttempts < 5) {
-          try {
-            await updateDoc(videoRef_fs, videoData);
-            saveSuccess = true;
-          } catch (e) {
-            saveAttempts++;
-            console.warn(`Firestore update attempt ${saveAttempts} failed, retrying...`, e);
-            await new Promise(r => setTimeout(r, Math.pow(2, saveAttempts) * 500));
-          }
-        }
+    // Update job with metadata and mark as finalized
+    setUploads(prev => prev.map(u => u.id === id ? { ...u, metadata, isFinalized: true } : u));
 
-        if (!saveSuccess) throw new Error("Could not save video to your profile. Please check your connection.");
-
-        // Trigger Transcoding - Only for Videos
-        if (currentJob.type === 'video') {
-          try {
-            setUploads(prev => prev.map(u => u.id === id ? { ...u, stage: 'transcoding' } : u));
-            const apiBase = import.meta.env.VITE_API_BASE_URL || '';
-            
-            // On Netlify/Static hosting, there is no backend to handle transcoding.
-            // We'll try to trigger it, but if it fails (e.g. 404), we'll assume static hosting and set status to ready.
-            const response = await fetch(`${apiBase}/api/videos/transcode`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ videoId: id, videoUrl: currentJob.videoUrl })
-            }).catch(() => null);
-            
-            if (!response || !response.ok) {
-              console.warn("Transcoding trigger failed or backend unavailable. Setting status to ready for static hosting compatibility.");
-              const videoRef_fs = doc(db, 'videos', id);
-              await updateDoc(videoRef_fs, { 
-                status: 'ready',
-                updatedAt: Date.now()
-              });
-            }
-          } catch (e) {
-            console.warn("Transcoding trigger failed, video might stay in processing. Attempting fallback to ready status.", e);
-            try {
-              const videoRef_fs = doc(db, 'videos', id);
-              await updateDoc(videoRef_fs, { 
-                status: 'ready',
-                updatedAt: Date.now()
-              });
-            } catch (fallbackErr) {
-              console.error("Fallback to ready status failed:", fallbackErr);
-            }
-          }
-        }
-
-        setUploads(prev => prev.map(u => u.id === id ? { ...u, status: 'completed', progress: 100, stage: 'done' } : u));
-        
-        // Keep the success state visible for a bit then remove
-        setTimeout(() => {
-          setUploads(prev => prev.filter(u => u.id !== id));
-        }, 8000);
-        
-        isReady = true;
-      } else {
-        attempts++;
-        
-        // RESCUE LOGIC: If stuck at 99% for more than 10 seconds, try to force URL fetch
-        if (attempts > 20 && currentJob.progress >= 99 && !currentJob.videoUrl) {
-          console.log("Rescue logic triggered for stuck upload...");
-          setUploads(prev => prev.map(u => u.id === id ? { ...u, stage: 'processing' } : u));
-          try {
-            // We can't easily get the ref here without storing it, 
-            // but we can try to guess it or just wait.
-            // Actually, the startUpload closure has the refs.
-            // Let's just rely on the improved onComplete for now, 
-            // but increase the polling frequency or add a manual check.
-          } catch (e) {
-            console.error("Rescue failed", e);
-          }
-        }
-        
-        await new Promise(r => setTimeout(r, 500));
-      }
+    // If URLs are already present, save immediately
+    if (currentJob.videoUrl && currentJob.thumbnailUrl) {
+      await saveToFirestore(id, user, currentJob, metadata);
     }
-
-    if (!isReady) throw new Error("Publishing is taking longer than expected. Your video will appear on your profile once processing is complete.");
-  }, []);
+    // If not, the onComplete handler in startUpload will take care of it
+  }, [saveToFirestore]);
 
   const updateThumbnail = useCallback(async (id: string, thumbnailBlob: Blob, userId: string) => {
     try {

@@ -1,7 +1,7 @@
 import { db } from './firebase';
 import { doc, collection, addDoc, serverTimestamp, increment, updateDoc, setDoc } from 'firebase/firestore';
 
-export type InteractionType = 'view' | 'like' | 'share' | 'comment' | 'watch_time' | 'complete_watch';
+export type InteractionType = 'view' | 'like' | 'share' | 'comment' | 'watch_time' | 'complete_watch' | 'skip' | 'report';
 
 export async function trackInteraction(userId: string, videoId: string, creatorId: string, type: InteractionType, value: number = 1) {
   try {
@@ -16,13 +16,27 @@ export async function trackInteraction(userId: string, videoId: string, creatorI
       createdAt: Date.now()
     });
 
-    // 2. Update user's interest profile (aggregate by creator and potentially hashtags if we had them easily)
-    // We'll store a score for each creator the user interacts with
+    // 2. Update video's negative counts if applicable
+    if (type === 'skip' || type === 'report') {
+      const videoRef = doc(db, 'videos', videoId);
+      await updateDoc(videoRef, {
+        [type === 'skip' ? 'skipsCount' : 'reportsCount']: increment(1)
+      });
+    }
+
+    // 3. Update user's interest profile
     const interestRef = doc(db, 'user_interests', `${userId}_${creatorId}`);
     await setDoc(interestRef, {
       userId,
       creatorId,
-      score: increment(type === 'like' ? 5 : type === 'share' ? 10 : type === 'comment' ? 8 : type === 'complete_watch' ? 15 : 1),
+      score: increment(
+        type === 'like' ? 5 : 
+        type === 'share' ? 10 : 
+        type === 'comment' ? 8 : 
+        type === 'complete_watch' ? 15 : 
+        type === 'skip' ? -10 : 
+        type === 'report' ? -50 : 1
+      ),
       lastInteraction: Date.now()
     }, { merge: true });
 

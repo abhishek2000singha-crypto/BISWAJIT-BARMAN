@@ -142,6 +142,38 @@ const MOCK_AUDIO_TRACKS: AudioTrack[] = [
     language: 'English',
     genre: 'Pop',
     isTrending: true
+  },
+  {
+    id: 'e4',
+    title: 'Levitating',
+    artist: 'Dua Lipa',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-14.mp3',
+    thumbnailUrl: 'https://picsum.photos/seed/dua/100/100',
+    duration: 203,
+    language: 'English',
+    genre: 'Pop',
+    isTrending: true
+  },
+  {
+    id: 'h4',
+    title: 'Raataan Lambiyan',
+    artist: 'Jubin Nautiyal',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3',
+    thumbnailUrl: 'https://picsum.photos/seed/hindi4/100/100',
+    duration: 225,
+    language: 'Hindi',
+    genre: 'Romantic'
+  },
+  {
+    id: 'h5',
+    title: 'Nacho Nacho',
+    artist: 'Rahul Sipligunj',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3',
+    thumbnailUrl: 'https://picsum.photos/seed/hindi5/100/100',
+    duration: 210,
+    language: 'Hindi',
+    genre: 'Dance',
+    isTrending: true
   }
 ];
 

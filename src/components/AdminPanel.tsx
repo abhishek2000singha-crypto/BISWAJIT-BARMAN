@@ -28,7 +28,7 @@ import {
 export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void }> = ({ currentUser, onLogout }) => {
   const { showError, showSuccess } = useError();
   const { uploads, removeUpload } = useUpload();
-  const [activeTab, setActiveTab] = useState('stats');
+  const [activeTab, setActiveTab] = useState('uploads');
   const [pendingUsers, setPendingUsers] = useState<UserType[]>([]);
   const [allUsers, setAllUsers] = useState<UserType[]>([]);
   const [allVideos, setAllVideos] = useState<VideoType[]>([]);

@@ -26,6 +26,7 @@ const GIFT_AMOUNTS = [20, 50, 100, 200, 500, 1000];
 export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, targetUser, videoId, onClose }) => {
   const { showError, showSuccess } = useError();
   const [mode, setMode] = useState<'buy' | 'gift'>(targetUser ? 'gift' : 'buy');
+  const [paymentSource, setPaymentSource] = useState<'super_chat_balance' | 'wallet_balance'>('super_chat_balance');
   const [selectedPack, setSelectedPack] = useState(SUPER_CHAT_PACKS[0]);
   const [giftAmount, setGiftAmount] = useState(GIFT_AMOUNTS[0]);
   const [giftMessage, setGiftMessage] = useState('');
@@ -62,9 +63,14 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
 
   const handleSendGift = async () => {
     if (!targetUser) return;
-    if (currentUser.superChatBalance < giftAmount) {
-      showError("Insufficient Super Chat balance. Please buy more credits.");
-      setMode('buy');
+    
+    const balance = paymentSource === 'super_chat_balance' 
+      ? currentUser.superChatBalance 
+      : currentUser.walletBalance;
+
+    if (balance < giftAmount) {
+      showError(`Insufficient ${paymentSource === 'super_chat_balance' ? 'Super Chat' : 'Wallet'} balance.`);
+      if (paymentSource === 'super_chat_balance') setMode('buy');
       return;
     }
 
@@ -77,9 +83,15 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
       const receiverRef = doc(db, 'users', targetUser.uid);
 
       // 1. Deduct from sender
-      await updateDoc(senderRef, {
-        superChatBalance: increment(-giftAmount)
-      });
+      if (paymentSource === 'super_chat_balance') {
+        await updateDoc(senderRef, {
+          superChatBalance: increment(-giftAmount)
+        });
+      } else {
+        await updateDoc(senderRef, {
+          walletBalance: increment(-giftAmount)
+        });
+      }
 
       // 2. Add to receiver's wallet (earnings) - 70% share
       await updateDoc(receiverRef, {
@@ -137,7 +149,7 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
         senderId: currentUser.uid,
         senderName: currentUser.name,
         senderProfileImage: currentUser.profileImage,
-        type: 'monetization',
+        type: 'tip',
         videoId: videoId,
         videoThumbnail: videoThumbnail,
         message: `sent you a ₹${giftAmount} Super Chat! ${giftMessage ? `"${giftMessage}"` : ''}`
@@ -180,11 +192,20 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
               <p className="text-zinc-500 text-xs">Support your favorite creators</p>
             </div>
           </div>
-          <div className="bg-zinc-900 px-4 py-2 rounded-2xl border border-white/5">
-            <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Your Wallet</p>
-            <div className="flex items-center space-x-1 text-amber-500 font-black">
-              <IndianRupee size={12} />
-              <span>{currentUser.superChatBalance || 0}</span>
+          <div className="flex items-center space-x-3">
+            <div className="bg-zinc-900 px-4 py-2 rounded-2xl border border-white/5">
+              <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Credits</p>
+              <div className="flex items-center space-x-1 text-amber-500 font-black">
+                <IndianRupee size={12} />
+                <span>{currentUser.superChatBalance || 0}</span>
+              </div>
+            </div>
+            <div className="bg-zinc-900 px-4 py-2 rounded-2xl border border-white/5">
+              <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Wallet</p>
+              <div className="flex items-center space-x-1 text-emerald-500 font-black">
+                <IndianRupee size={12} />
+                <span>{currentUser.walletBalance || 0}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -252,6 +273,40 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
               <div>
                 <p className="text-xs text-zinc-500 font-bold uppercase tracking-widest">Sending to</p>
                 <p className="text-lg font-bold text-white">@{targetUser?.name}</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Payment Source</label>
+              <div className="grid grid-cols-2 gap-3">
+                <button 
+                  onClick={() => setPaymentSource('super_chat_balance')}
+                  className={`p-4 rounded-2xl border-2 transition-all text-left ${
+                    paymentSource === 'super_chat_balance' 
+                      ? 'border-amber-500 bg-amber-500/10' 
+                      : 'border-white/5 bg-white/5'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <Sparkles size={14} className={paymentSource === 'super_chat_balance' ? 'text-amber-500' : 'text-zinc-500'} />
+                    <span className="text-[10px] font-black text-white">₹{currentUser.superChatBalance}</span>
+                  </div>
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Credits</p>
+                </button>
+                <button 
+                  onClick={() => setPaymentSource('wallet_balance')}
+                  className={`p-4 rounded-2xl border-2 transition-all text-left ${
+                    paymentSource === 'wallet_balance' 
+                      ? 'border-emerald-500 bg-emerald-500/10' 
+                      : 'border-white/5 bg-white/5'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <Wallet size={14} className={paymentSource === 'wallet_balance' ? 'text-emerald-500' : 'text-zinc-500'} />
+                    <span className="text-[10px] font-black text-white">₹{currentUser.walletBalance}</span>
+                  </div>
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Earnings</p>
+                </button>
               </div>
             </div>
 
