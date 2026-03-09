@@ -12,6 +12,7 @@ import { BoostModal } from './BoostModal';
 import confetti from 'canvas-confetti';
 import { sendNotification } from '../services/notificationService';
 import { useError } from '../contexts/ErrorContext';
+import { trackInteraction } from '../services/interactionService';
 
 interface VideoCardProps {
   video: Video;
@@ -139,6 +140,10 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
             batch.update(videoRef, { viewsCount: increment(1) });
             batch.update(userRef, { totalViews: increment(1) });
             await batch.commit();
+
+            if (auth.currentUser) {
+              trackInteraction(auth.currentUser.uid, video.id, video.userId, 'view');
+            }
           } catch (error) {
             console.error("Error incrementing views:", error);
           }
@@ -169,11 +174,22 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
 
   useEffect(() => {
     let watchInterval: any;
+    let secondsWatched = 0;
     if (isActive && isPlaying && video.type === 'video') {
       watchInterval = setInterval(async () => {
+        secondsWatched++;
         try {
           const videoRef = doc(db, 'videos', video.id);
           await updateDoc(videoRef, { totalWatchTime: increment(1) });
+          
+          if (auth.currentUser) {
+            trackInteraction(auth.currentUser.uid, video.id, video.userId, 'watch_time', 1);
+            
+            // If watched more than 80% of video, track as complete watch
+            if (video.duration && secondsWatched >= video.duration * 0.8 && secondsWatched < video.duration * 0.8 + 1) {
+              trackInteraction(auth.currentUser.uid, video.id, video.userId, 'complete_watch');
+            }
+          }
         } catch (error) {
           console.error("Error updating watch time:", error);
         }
@@ -267,28 +283,39 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
     }
 
     const likeId = `${auth.currentUser.uid}_${video.id}`;
-    const likeRef = doc(db, 'likes', likeId);
-    const videoRef = doc(db, 'videos', video.id);
-    const creatorRef = doc(db, 'users', video.userId);
+    const likeDocRef = doc(db, 'likes', likeId);
+    const videoDocRef = doc(db, 'videos', video.id);
+    const creatorDocRef = doc(db, 'users', video.userId);
+
+    // Optimistic update
+    const newIsLiked = !isLiked;
+    const likeDelta = newIsLiked ? 1 : -1;
+    
+    setIsLiked(newIsLiked);
+    setVideo(prev => ({
+      ...prev,
+      likesCount: (prev.likesCount || 0) + likeDelta
+    }));
 
     try {
       const batch = writeBatch(db);
-      if (isLiked) {
-        batch.delete(likeRef);
-        batch.update(videoRef, { likesCount: increment(-1) });
-        batch.update(creatorRef, { totalLikes: increment(-1) });
-        setIsLiked(false);
+      if (!newIsLiked) {
+        batch.delete(likeDocRef);
+        batch.update(videoDocRef, { likesCount: increment(-1) });
+        batch.update(creatorDocRef, { totalLikes: increment(-1) });
       } else {
-        batch.set(likeRef, {
+        batch.set(likeDocRef, {
           userId: auth.currentUser.uid,
           videoId: video.id,
           createdAt: Date.now()
         });
-        batch.update(videoRef, { likesCount: increment(1) });
-        batch.update(creatorRef, { totalLikes: increment(1) });
-        setIsLiked(true);
+        batch.update(videoDocRef, { likesCount: increment(1) });
+        batch.update(creatorDocRef, { totalLikes: increment(1) });
+        
         setShowHeartAnim(true);
         setTimeout(() => setShowHeartAnim(false), 1000);
+
+        trackInteraction(auth.currentUser.uid, video.id, video.userId, 'like');
 
         // Send notification
         if (currentUser && currentUser.uid !== video.userId) {
@@ -307,6 +334,13 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
       await batch.commit();
     } catch (error) {
       console.error("Error toggling like:", error);
+      // Rollback on error
+      setIsLiked(!newIsLiked);
+      setVideo(prev => ({
+        ...prev,
+        likesCount: (prev.likesCount || 0) - likeDelta
+      }));
+      showError("Failed to update like. Please try again.");
     }
   };
 
@@ -330,6 +364,10 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
       // Increment share count
       const videoRef = doc(db, 'videos', video.id);
       await updateDoc(videoRef, { sharesCount: increment(1) });
+
+      if (auth.currentUser) {
+        trackInteraction(auth.currentUser.uid, video.id, video.userId, 'share');
+      }
     } catch (error) {
       console.error("Error sharing:", error);
     }
@@ -370,19 +408,26 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
 
       {/* Quality Badge - Only for Video */}
       {video.type === 'video' && (
-        <div className="absolute top-24 right-4 z-10 flex flex-col items-end space-y-2">
-          <div className="bg-black/40 backdrop-blur-sm border border-white/20 px-2 py-1 rounded-md flex items-center space-x-1">
+        <div className="absolute top-24 right-4 z-10 flex flex-col items-end space-y-3">
+          <motion.div 
+            initial={{ x: 20, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            className="glass-dark px-3 py-1.5 rounded-xl flex items-center space-x-2 shadow-2xl"
+          >
             <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-            <span className="text-[10px] font-black text-white tracking-tighter">1080P</span>
-          </div>
+            <span className="text-[10px] font-black text-white tracking-widest font-display">4K ULTRA HD</span>
+          </motion.div>
           
-          <button 
+          <motion.button 
+            initial={{ x: 20, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            transition={{ delay: 0.1 }}
             onClick={toggleMute}
             aria-label={isMuted ? "Unmute video" : "Mute video"}
-            className="bg-black/40 backdrop-blur-sm border border-white/20 p-2 rounded-full text-white hover:bg-black/60 transition-all"
+            className="glass-dark p-3 rounded-full text-white hover:bg-white/20 transition-all shadow-2xl active:scale-90"
           >
-            {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-          </button>
+            {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+          </motion.button>
         </div>
       )}
 
@@ -433,7 +478,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
           className="relative"
         >
           <div 
-            className="w-12 h-12 rounded-full border-2 border-white overflow-hidden bg-zinc-800 cursor-pointer shadow-xl group"
+            className="w-14 h-14 rounded-full border-2 border-white overflow-hidden bg-zinc-800 cursor-pointer shadow-2xl group ring-4 ring-white/10"
             onClick={(e) => { 
               e.stopPropagation(); 
               if (onUserClick) onUserClick(video.userId); 
@@ -451,7 +496,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
               disabled={isFollowLoading}
               aria-label={isFollowing ? "Following" : "Follow"}
               className={cn(
-                "absolute -bottom-2 left-1/2 -translate-x-1/2 rounded-full p-0.5 text-white transition-all shadow-lg",
+                "absolute -bottom-2 left-1/2 -translate-x-1/2 rounded-full p-1 text-white transition-all shadow-xl ring-2 ring-black",
                 isFollowing ? "bg-zinc-500" : "bg-rose-500"
               )}
             >
@@ -460,140 +505,171 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
           )}
         </motion.div>
 
-        <button 
+        <motion.button 
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.8 }}
           onClick={handleLike}
           aria-label={isLiked ? `Unlike ${video.type}` : `Like ${video.type}`}
-          className="flex flex-col items-center"
+          className="flex flex-col items-center group"
         >
-          <Heart 
-            size={32} 
-            className={cn("transition-colors", isLiked ? "fill-rose-500 text-rose-500" : "text-white")} 
-          />
-          <span className="text-white text-xs font-medium mt-1">{formatNumber(video.likesCount)}</span>
-        </button>
+          <div className="glass-dark p-3 rounded-full mb-1 group-hover:bg-white/10 transition-colors">
+            <Heart 
+              size={28} 
+              className={cn("transition-all", isLiked ? "fill-rose-500 text-rose-500 scale-110" : "text-white")} 
+            />
+          </div>
+          <span className="text-white text-[11px] font-black font-display tracking-widest">{formatNumber(video.likesCount)}</span>
+        </motion.button>
 
-        <button 
+        <motion.button 
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.8 }}
           onClick={(e) => { e.stopPropagation(); setShowComments(true); }}
           aria-label="View comments"
-          className="flex flex-col items-center"
+          className="flex flex-col items-center group"
         >
-          <MessageCircle size={32} className="text-white" />
-          <span className="text-white text-xs font-medium mt-1">{formatNumber(video.commentsCount)}</span>
-        </button>
+          <div className="glass-dark p-3 rounded-full mb-1 group-hover:bg-white/10 transition-colors">
+            <MessageCircle size={28} className="text-white" />
+          </div>
+          <span className="text-white text-[11px] font-black font-display tracking-widest">{formatNumber(video.commentsCount)}</span>
+        </motion.button>
 
         {currentUser && currentUser.uid !== video.userId && (
           <div className="flex flex-col items-center space-y-6">
-            <button 
+            <motion.button 
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.8 }}
               onClick={(e) => { e.stopPropagation(); setShowSuperChat(true); }}
               aria-label="Send Super Chat"
-              className="flex flex-col items-center"
+              className="flex flex-col items-center group"
             >
-              <div className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center shadow-lg shadow-amber-500/40 animate-bounce-slow">
+              <div className="w-12 h-12 bg-amber-500 rounded-full flex items-center justify-center shadow-lg shadow-amber-500/40 animate-float">
                 <Sparkles size={24} className="text-white" />
               </div>
-              <span className="text-amber-500 text-[10px] font-black mt-1 uppercase tracking-tighter">Super Chat</span>
-            </button>
+              <span className="text-amber-500 text-[9px] font-black mt-1 uppercase tracking-widest font-display">Super Chat</span>
+            </motion.button>
 
-            <button 
+            <motion.button 
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.8 }}
               onClick={(e) => { e.stopPropagation(); setShowBoostModal(true); }}
               aria-label="Boost Reel"
-              className="flex flex-col items-center"
+              className="flex flex-col items-center group"
             >
-              <div className="w-10 h-10 bg-gradient-to-tr from-rose-600 to-orange-500 rounded-full flex items-center justify-center shadow-lg shadow-rose-500/40">
-                <Rocket size={20} className="text-white" />
+              <div className="w-12 h-12 bg-gradient-to-tr from-rose-600 to-orange-500 rounded-full flex items-center justify-center shadow-lg shadow-rose-500/40">
+                <Rocket size={24} className="text-white" />
               </div>
-              <span className="text-rose-400 text-[10px] font-black mt-1 uppercase tracking-tighter">Boost</span>
-            </button>
+              <span className="text-rose-400 text-[9px] font-black mt-1 uppercase tracking-widest font-display">Boost</span>
+            </motion.button>
           </div>
         )}
 
-        <button 
+        <motion.button 
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.8 }}
           onClick={handleShare}
           aria-label={`Share ${video.type}`}
-          className="flex flex-col items-center"
+          className="flex flex-col items-center group"
         >
-          <Share2 size={32} className="text-white" />
-          <span className="text-white text-xs font-medium mt-1">{formatNumber(video.sharesCount)}</span>
-        </button>
+          <div className="glass-dark p-3 rounded-full mb-1 group-hover:bg-white/10 transition-colors">
+            <Share2 size={28} className="text-white" />
+          </div>
+          <span className="text-white text-[11px] font-black font-display tracking-widest">{formatNumber(video.sharesCount)}</span>
+        </motion.button>
 
         <div className="flex flex-col items-center">
-          <Eye size={32} className="text-white" />
-          <span className="text-white text-xs font-medium mt-1">{formatNumber(video.viewsCount)}</span>
+          <div className="glass-dark p-3 rounded-full mb-1">
+            <Eye size={28} className="text-white" />
+          </div>
+          <span className="text-white text-[11px] font-black font-display tracking-widest">{formatNumber(video.viewsCount)}</span>
         </div>
       </div>
 
       {/* Bottom Info */}
-      <div className="absolute bottom-4 left-4 right-16 z-10">
-        <p className="text-white text-sm line-clamp-2 mb-3">{video.caption}</p>
-        
-        <div className="flex items-center space-x-3 mb-3">
-          <div 
-            className="flex items-center space-x-2 cursor-pointer group"
-            onClick={(e) => { 
-              e.stopPropagation(); 
-              if (onUserClick) onUserClick(video.userId); 
-            }}
-          >
-            <img 
-              src={video.userProfileImage} 
-              alt={video.userName} 
-              className="w-9 h-9 rounded-full object-cover border-2 border-white/20 group-hover:border-rose-500 transition-all" 
-            />
-            <h3 className="text-white font-bold text-base group-hover:text-rose-400 transition-colors">
-              @{video.userName}
-            </h3>
+      <div className="absolute bottom-8 left-6 right-20 z-10 pointer-events-none">
+        <motion.div 
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="space-y-4"
+        >
+          <div className="flex items-center space-x-3 pointer-events-auto">
+            <div 
+              className="flex items-center space-x-3 cursor-pointer group"
+              onClick={(e) => { 
+                e.stopPropagation(); 
+                if (onUserClick) onUserClick(video.userId); 
+              }}
+            >
+              <div className="relative">
+                <img 
+                  src={video.userProfileImage} 
+                  alt={video.userName} 
+                  className="w-11 h-11 rounded-full object-cover border-2 border-white/40 group-hover:border-rose-500 transition-all shadow-2xl" 
+                />
+                <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-rose-500 rounded-full border-2 border-black flex items-center justify-center">
+                  <Check size={8} className="text-white" />
+                </div>
+              </div>
+              <div className="flex flex-col">
+                <h3 className="text-white font-black text-lg group-hover:text-rose-400 transition-colors font-display tracking-tight">
+                  @{video.userName}
+                </h3>
+                <div className="flex items-center space-x-2 text-white/50 text-[10px] font-black uppercase tracking-widest">
+                  <span>{formatDistanceToNow(video.createdAt)} ago</span>
+                  {video.boosted && (
+                    <span className="text-amber-400 flex items-center">
+                      <Sparkles size={10} className="mr-1" /> PROMOTED
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            {auth.currentUser?.uid !== video.userId && (
+              <button 
+                onClick={handleFollow}
+                disabled={isFollowLoading}
+                className={cn(
+                  "px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-[0.15em] transition-all pointer-events-auto",
+                  isFollowing 
+                    ? "glass text-white" 
+                    : "bg-white text-black hover:bg-zinc-200 shadow-xl"
+                )}
+              >
+                {isFollowLoading ? <Loader2 className="animate-spin" size={12} /> : (isFollowing ? 'Following' : 'Follow')}
+              </button>
+            )}
           </div>
+
+          <p className="text-white text-sm font-medium leading-relaxed drop-shadow-md max-w-md pointer-events-auto">
+            {video.caption}
+          </p>
           
-          <div className="flex items-center space-x-2 text-white/60 text-[10px] font-bold">
-            <span>•</span>
-            <span>{formatDistanceToNow(video.createdAt)} ago</span>
+          <div className="flex items-center space-x-4 pointer-events-auto">
+            <div className="glass-dark px-3 py-2 rounded-2xl flex items-center space-x-3 max-w-[200px]">
+              <div className="w-6 h-6 bg-white/10 rounded-full flex items-center justify-center shrink-0">
+                <Music2 size={12} className="text-white animate-spin-slow" />
+              </div>
+              <span className="text-[11px] font-bold text-white/90 truncate font-display">
+                {video.type === 'video' ? (
+                  video.audioTrack 
+                    ? `${video.audioTrack.title} - ${video.audioTrack.artist}` 
+                    : `Original Audio - ${video.userName}`
+                ) : (
+                  `Photo Post - ${video.userName}`
+                )}
+              </span>
+            </div>
+            
             {video.duration && (
-              <>
-                <span>•</span>
-                <span className="bg-black/40 px-1.5 py-0.5 rounded border border-white/10">
+              <div className="glass-dark px-3 py-2 rounded-2xl">
+                <span className="text-[11px] font-black text-white/90 font-display">
                   {formatDuration(video.duration)}
                 </span>
-              </>
+              </div>
             )}
           </div>
-          
-          {auth.currentUser?.uid !== video.userId && (
-            <button 
-              onClick={handleFollow}
-              disabled={isFollowLoading}
-              aria-label={isFollowing ? `Unfollow ${video.userName}` : `Follow ${video.userName}`}
-              className={cn(
-                "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest transition-all",
-                isFollowing 
-                  ? "bg-white/10 text-white border border-white/20" 
-                  : "bg-rose-500 text-white shadow-lg shadow-rose-500/20 hover:bg-rose-600"
-              )}
-            >
-              {isFollowLoading ? (
-                <Loader2 className="animate-spin" size={12} />
-              ) : (
-                isFollowing ? 'Following' : 'Follow'
-              )}
-            </button>
-          )}
-          {video.boosted && (
-            <span className="bg-amber-400 text-black text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center">
-              <CheckCircle2 size={10} className="mr-0.5" /> BOOSTED
-            </span>
-          )}
-        </div>
-        <div className="flex items-center text-white text-sm">
-          {video.type === 'video' && <Music2 size={14} className="mr-2 animate-spin-slow" />}
-          <span className="truncate">
-            {video.type === 'video' ? (
-              video.audioTrack 
-                ? `${video.audioTrack.title} - ${video.audioTrack.artist}` 
-                : `Original Audio - ${video.userName}`
-            ) : (
-              `Photo Post - ${video.userName}`
-            )}
-          </span>
-        </div>
+        </motion.div>
       </div>
 
       {/* Progress Bar */}

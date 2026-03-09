@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Search, TrendingUp, Users, Sparkles, Play, Heart, ChevronRight, Loader2 } from 'lucide-react';
-import { collection, query, orderBy, limit, onSnapshot, getDocs, where } from 'firebase/firestore';
+import { collection, query, orderBy, limit, onSnapshot, getDocs, where, doc, writeBatch, increment } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { Video, User } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -8,12 +8,13 @@ import { formatNumber, cn } from '../utils';
 import { useError } from '../contexts/ErrorContext';
 
 interface DiscoverProps {
+  currentUser: User | null;
   onUserClick: (uid: string) => void;
   onVideoClick: (video: Video) => void;
 }
 
-export const Discover: React.FC<DiscoverProps> = ({ onUserClick, onVideoClick }) => {
-  const { showError } = useError();
+export const Discover: React.FC<DiscoverProps> = ({ currentUser, onUserClick, onVideoClick }) => {
+  const { showError, showSuccess } = useError();
   const [searchQuery, setSearchQuery] = useState('');
   const [trendingVideos, setTrendingVideos] = useState<Video[]>([]);
   const [popularCreators, setPopularCreators] = useState<User[]>([]);
@@ -21,6 +22,81 @@ export const Discover: React.FC<DiscoverProps> = ({ onUserClick, onVideoClick })
   const [isLoading, setIsLoading] = useState(true);
   const [searchResults, setSearchResults] = useState<{ videos: Video[], users: User[] }>({ videos: [], users: [] });
   const [isSearching, setIsSearching] = useState(false);
+  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
+  const [followLoading, setFollowLoading] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (currentUser) {
+      const q = query(
+        collection(db, 'follows'),
+        where('followerId', '==', currentUser.uid)
+      );
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const ids = new Set(snapshot.docs.map(doc => doc.data().followingId));
+        setFollowingIds(ids);
+      });
+      return () => unsubscribe();
+    } else {
+      setFollowingIds(new Set());
+    }
+  }, [currentUser]);
+
+  const handleFollow = async (e: React.MouseEvent, targetUser: User) => {
+    e.stopPropagation();
+    if (!currentUser) {
+      showError("Please login to follow creators");
+      return;
+    }
+    if (currentUser.uid === targetUser.uid) return;
+
+    setFollowLoading(targetUser.uid);
+    try {
+      const isFollowing = followingIds.has(targetUser.uid);
+      const followId = `${currentUser.uid}_${targetUser.uid}`;
+      const followRef = doc(db, 'follows', followId);
+      const creatorRef = doc(db, 'users', targetUser.uid);
+      const currentUserRef = doc(db, 'users', currentUser.uid);
+
+      const batch = writeBatch(db);
+
+      if (isFollowing) {
+        batch.delete(followRef);
+        batch.update(creatorRef, { followersCount: increment(-1) });
+        batch.update(currentUserRef, { followingCount: increment(-1) });
+      } else {
+        batch.set(followRef, {
+          followerId: currentUser.uid,
+          followingId: targetUser.uid,
+          createdAt: Date.now()
+        });
+        batch.update(creatorRef, { followersCount: increment(1) });
+        batch.update(currentUserRef, { followingCount: increment(1) });
+        
+        // Add notification
+        const notificationRef = doc(collection(db, 'notifications'));
+        batch.set(notificationRef, {
+          userId: targetUser.uid,
+          senderId: currentUser.uid,
+          senderName: currentUser.name,
+          senderProfileImage: currentUser.profileImage,
+          type: 'follow',
+          message: `${currentUser.name} started following you`,
+          read: false,
+          createdAt: Date.now()
+        });
+      }
+
+      await batch.commit();
+      if (!isFollowing) {
+        showSuccess(`You are now following @${targetUser.name}`);
+      }
+    } catch (error) {
+      console.error("Error following user:", error);
+      showError("Failed to update follow status.");
+    } finally {
+      setFollowLoading(null);
+    }
+  };
 
   useEffect(() => {
     if (!searchQuery.trim()) {
@@ -164,7 +240,7 @@ export const Discover: React.FC<DiscoverProps> = ({ onUserClick, onVideoClick })
                         <div 
                           key={user.uid}
                           onClick={() => onUserClick(user.uid)}
-                          className="flex items-center justify-between bg-zinc-900/50 p-4 rounded-2xl border border-white/5 cursor-pointer hover:bg-zinc-800 transition-colors"
+                          className="flex items-center justify-between bg-zinc-900/50 p-4 rounded-2xl border border-white/5 cursor-pointer hover:bg-zinc-800 transition-colors group"
                         >
                           <div className="flex items-center space-x-4">
                             <img src={user.profileImage} className="w-12 h-12 rounded-full object-cover border border-white/10" alt="" />
@@ -173,7 +249,27 @@ export const Discover: React.FC<DiscoverProps> = ({ onUserClick, onVideoClick })
                               <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">{formatNumber(user.followersCount)} Followers</p>
                             </div>
                           </div>
-                          <ChevronRight size={16} className="text-zinc-500" />
+                          <div className="flex items-center space-x-3">
+                            {currentUser?.uid !== user.uid && (
+                              <button 
+                                onClick={(e) => handleFollow(e, user)}
+                                disabled={followLoading === user.uid}
+                                className={cn(
+                                  "px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all",
+                                  followingIds.has(user.uid)
+                                    ? "bg-zinc-800 text-zinc-400"
+                                    : "bg-rose-500 text-white shadow-lg shadow-rose-500/20"
+                                )}
+                              >
+                                {followLoading === user.uid ? (
+                                  <Loader2 size={12} className="animate-spin" />
+                                ) : (
+                                  followingIds.has(user.uid) ? 'Following' : 'Follow'
+                                )}
+                              </button>
+                            )}
+                            <ChevronRight size={16} className="text-zinc-500 group-hover:text-white transition-colors" />
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -233,7 +329,7 @@ export const Discover: React.FC<DiscoverProps> = ({ onUserClick, onVideoClick })
                 key={creator.uid}
                 whileHover={{ y: -5 }}
                 onClick={() => onUserClick(creator.uid)}
-                className="flex flex-col items-center space-y-3 min-w-[100px] cursor-pointer group"
+                className="flex flex-col items-center space-y-3 min-w-[120px] cursor-pointer group"
               >
                 <div className="relative">
                   <div className="w-20 h-20 rounded-[28px] overflow-hidden border-2 border-zinc-800 group-hover:border-rose-500 transition-colors">
@@ -245,11 +341,29 @@ export const Discover: React.FC<DiscoverProps> = ({ onUserClick, onVideoClick })
                     </div>
                   )}
                 </div>
-                <div className="text-center">
+                <div className="text-center flex flex-col items-center">
                   <p className="text-xs font-black text-white truncate max-w-[80px]">@{creator.name}</p>
                   <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mt-0.5">
                     {formatNumber(creator.followersCount)} Fans
                   </p>
+                  {currentUser?.uid !== creator.uid && (
+                    <button 
+                      onClick={(e) => handleFollow(e, creator)}
+                      disabled={followLoading === creator.uid}
+                      className={cn(
+                        "mt-2 px-3 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all w-full",
+                        followingIds.has(creator.uid)
+                          ? "bg-zinc-800 text-zinc-400"
+                          : "bg-rose-500 text-white"
+                      )}
+                    >
+                      {followLoading === creator.uid ? (
+                        <Loader2 size={10} className="animate-spin mx-auto" />
+                      ) : (
+                        followingIds.has(creator.uid) ? 'Following' : 'Follow'
+                      )}
+                    </button>
+                  )}
                 </div>
               </motion.div>
             ))}

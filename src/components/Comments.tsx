@@ -7,6 +7,7 @@ import { Comment, User, Video } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 import { sendNotification } from '../services/notificationService';
 import { useError } from '../contexts/ErrorContext';
+import { trackInteraction } from '../services/interactionService';
 
 interface CommentsProps {
   videoId: string;
@@ -65,6 +66,15 @@ export const Comments: React.FC<CommentsProps> = ({ videoId, onClose, onUserClic
       };
 
       await addDoc(collection(db, 'comments'), commentData);
+      
+      if (auth.currentUser) {
+        // We'll need the video owner's ID. We can get it from videoSnap.
+        const videoSnap = await getDoc(doc(db, 'videos', videoId));
+        if (videoSnap.exists()) {
+          const videoData = videoSnap.data() as Video;
+          trackInteraction(auth.currentUser.uid, videoId, videoData.userId, 'comment');
+        }
+      }
       
       // Update comment count on video
       const videoRef = doc(db, 'videos', videoId);

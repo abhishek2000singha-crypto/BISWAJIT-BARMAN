@@ -39,6 +39,111 @@ export const Feed: React.FC<{
     }
   }, [currentUser, feedType]);
 
+  const [userInterests, setUserInterests] = useState<Record<string, number>>({});
+  const [hashtagInterests, setHashtagInterests] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (currentUser) {
+      const q = query(collection(db, 'user_interests'), where('userId', '==', currentUser.uid));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const interests: Record<string, number> = {};
+        snapshot.docs.forEach(doc => {
+          const data = doc.data();
+          interests[data.creatorId] = data.score;
+        });
+        setUserInterests(interests);
+      });
+
+      // Also fetch hashtag interests if they exist (hypothetically)
+      // For now, we'll derive some from recently liked videos
+      const likesQuery = query(
+        collection(db, 'likes'),
+        where('userId', '==', currentUser.uid),
+        orderBy('createdAt', 'desc'),
+        limit(50)
+      );
+      
+      const unsubLikes = onSnapshot(likesQuery, async (snapshot) => {
+        const videoIds = snapshot.docs.map(doc => doc.data().videoId);
+        if (videoIds.length > 0) {
+          const hashtagCounts: Record<string, number> = {};
+          // We can't easily fetch all videos at once due to 'in' limits, 
+          // but we can approximate or just use the ones we have in state
+          videos.forEach(v => {
+            if (videoIds.includes(v.id) && v.hashtags) {
+              v.hashtags.forEach(tag => {
+                hashtagCounts[tag] = (hashtagCounts[tag] || 0) + 1;
+              });
+            }
+          });
+          setHashtagInterests(hashtagCounts);
+        }
+      });
+
+      return () => {
+        unsubscribe();
+        unsubLikes();
+      };
+    }
+  }, [currentUser, videos.length]);
+
+  const rankVideos = (videoList: Video[]) => {
+    const now = Date.now();
+    return videoList.map(v => {
+      const ageInHours = (now - v.createdAt) / (1000 * 60 * 60);
+      
+      // 1. Recency Score (Exponential decay)
+      const recencyScore = 200 / Math.pow(ageInHours + 1, 1.2);
+      
+      // 2. Engagement Velocity (Trending)
+      // We weight different interactions differently
+      const engagementScore = (
+        (v.likesCount || 0) * 10 + 
+        (v.commentsCount || 0) * 15 +
+        (v.sharesCount || 0) * 20 +
+        (v.viewsCount || 0) * 1 +
+        ((v.totalWatchTime || 0) / 60) * 5 // 5 points per minute watched
+      ) / Math.pow(ageInHours + 2, 1.1);
+
+      // 3. Personalization: Creator Affinity
+      const creatorScore = (userInterests[v.userId] || 0) * 12;
+      
+      // 4. Personalization: Hashtag Affinity
+      let hashtagScore = 0;
+      if (v.hashtags) {
+        v.hashtags.forEach(tag => {
+          hashtagScore += (hashtagInterests[tag] || 0) * 25;
+        });
+      }
+
+      // 5. Relationship Bonus
+      const followScore = followingIds.includes(v.userId) ? 150 : 0;
+      
+      // 6. Commercial/Platform Priority
+      const boostScore = v.boosted ? 2000 : 0;
+      
+      // 7. Serendipity & Exploration (The "Discovery" factor)
+      // We add a random component that is higher for newer videos to give them a chance
+      const serendipity = Math.random() * (50 / (ageInHours + 1));
+
+      // 8. Diversity Penalty (Avoid showing too many from same creator in a row)
+      // This is harder to do in a simple map, but we can add a small random jitter
+      const jitter = Math.random() * 10;
+
+      const totalScore = 
+        recencyScore + 
+        engagementScore + 
+        creatorScore + 
+        hashtagScore + 
+        followScore + 
+        boostScore + 
+        serendipity + 
+        jitter;
+      
+      return { ...v, _score: totalScore };
+    }).sort((a, b) => (b as any)._score - (a as any)._score);
+  };
+
   const loadVideos = async (isInitial = false) => {
     if (loading || (!hasMore && !isInitial)) return;
     setLoading(true);
@@ -59,9 +164,8 @@ export const Feed: React.FC<{
       }
 
       const constraints: any[] = [
-        orderBy('boosted', 'desc'),
         orderBy('createdAt', 'desc'),
-        limit(5)
+        limit(20) // Fetch a larger pool for ranking
       ];
 
       if (feedType === 'following') {
@@ -91,15 +195,24 @@ export const Feed: React.FC<{
         if (snapshot.docs.length > 0) {
           setLastDoc(snapshot.docs[snapshot.docs.length - 1]);
         }
-        setHasMore(snapshot.docs.length === 5);
+        setHasMore(snapshot.docs.length === 20);
 
         setVideos(prev => {
-          let updatedVids = isInitial ? fetchedVids : [...prev, ...fetchedVids];
+          // Ensure unique videos by ID
+          const existingIds = new Set(isInitial ? [] : prev.map(v => v.id));
+          const uniqueFetched = fetchedVids.filter(v => !existingIds.has(v.id));
+          
+          let updatedVids = isInitial ? fetchedVids : [...prev, ...uniqueFetched];
           
           if (isInitial && initialVid) {
-            // Remove if it was already fetched in the batch to avoid duplicates
             updatedVids = [initialVid, ...updatedVids.filter(v => v.id !== initialVideoId)];
           }
+
+          // Apply ranking for 'For You' feed
+          if (feedType === 'foryou') {
+            return rankVideos(updatedVids);
+          }
+          
           return updatedVids;
         });
       }

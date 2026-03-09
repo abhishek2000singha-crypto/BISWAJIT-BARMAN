@@ -178,7 +178,7 @@ export const Profile: React.FC<{
         where('followingId', '==', user.uid)
       );
       const unsubscribe = onSnapshot(q, async (snapshot) => {
-        const followerIds = snapshot.docs.map(doc => doc.data().followerId);
+        const followerIds = Array.from(new Set(snapshot.docs.map(doc => doc.data().followerId)));
         if (followerIds.length === 0) {
           setFollowers([]);
           setIsFollowersLoading(false);
@@ -366,7 +366,7 @@ export const Profile: React.FC<{
         where('followerId', '==', user.uid)
       );
       const unsubscribe = onSnapshot(q, async (snapshot) => {
-        const followingIds = snapshot.docs.map(doc => doc.data().followingId);
+        const followingIds = Array.from(new Set(snapshot.docs.map(doc => doc.data().followingId)));
         if (followingIds.length === 0) {
           setFollowing([]);
           setIsFollowingLoading(false);
@@ -562,20 +562,35 @@ export const Profile: React.FC<{
           
           <div className="relative group">
             <motion.div 
-              whileHover={{ scale: 1.05 }}
+              animate={{ 
+                y: [0, -5, 0],
+              }}
+              transition={{ 
+                duration: 4, 
+                repeat: Infinity, 
+                ease: "easeInOut" 
+              }}
               className={cn(
-                "w-28 h-28 rounded-full border-4 overflow-hidden bg-zinc-900 relative z-10 transition-all duration-500",
+                "w-32 h-32 rounded-full border-4 overflow-hidden bg-zinc-900 relative z-10 transition-all duration-500",
                 user.monetizationStatus === 'approved' 
-                  ? "border-emerald-500/50 shadow-[0_0_30px_rgba(16,185,129,0.2)]" 
-                  : "border-zinc-800 shadow-[0_0_20px_rgba(0,0,0,0.5)]"
+                  ? "border-emerald-500/50 shadow-[0_0_40px_rgba(16,185,129,0.3)]" 
+                  : "border-white/10 shadow-[0_0_30px_rgba(0,0,0,0.8)]"
               )}
             >
               <img src={user?.profileImage || 'https://picsum.photos/seed/me/200/200'} alt="Profile" className="w-full h-full object-cover" />
+              {isOwnProfile && (
+                <div 
+                  onClick={() => setShowEditModal(true)}
+                  className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                >
+                  <Camera size={24} className="text-white" />
+                </div>
+              )}
             </motion.div>
             
             {/* Subtle Pulse Ring */}
             <motion.div 
-              animate={{ scale: [1, 1.1, 1], opacity: [0.3, 0, 0.3] }}
+              animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0, 0.3] }}
               transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
               className={cn(
                 "absolute inset-0 rounded-full border-2 pointer-events-none",
@@ -587,47 +602,37 @@ export const Profile: React.FC<{
               <motion.div 
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
-                className="absolute -bottom-1 -right-1 bg-emerald-500 p-1.5 rounded-full border-4 border-black z-20"
+                className="absolute -bottom-1 -right-1 bg-emerald-500 p-2 rounded-full border-4 border-black z-20 shadow-xl"
               >
-                <CheckCircle2 size={16} className="text-white" />
+                <CheckCircle2 size={18} className="text-white" />
               </motion.div>
             )}
           </div>
           
-          <div className="flex flex-col items-center mt-6">
-            <div className="flex items-center space-x-2">
-              <h2 className="text-2xl font-black tracking-tight">@{user?.name || 'raj_kumar'}</h2>
-              {user.isPrivate && <Lock size={16} className="text-zinc-500" />}
-              <button 
+          <div className="flex flex-col items-center mt-8">
+            <div className="flex items-center space-x-3">
+              <h2 className="text-3xl font-black tracking-tight font-display">@{user?.name || 'creator'}</h2>
+              {user.isPrivate && <Lock size={18} className="text-zinc-500" />}
+              <motion.button 
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
                 onClick={() => {
                   const url = `${window.location.origin}?profile=${user?.uid}`;
                   navigator.clipboard.writeText(url);
                   showSuccess("Profile link copied!");
                 }}
-                className="p-1.5 text-zinc-500 hover:text-white transition-colors"
+                className="p-2 glass-dark rounded-full text-zinc-400 hover:text-white transition-colors"
                 title="Copy profile link"
               >
-                <Share2 size={16} />
-              </button>
-              {user.monetizationStatus && user.monetizationStatus !== 'none' && (
-                <div className={`flex items-center space-x-1 px-2 py-0.5 rounded-full border text-[10px] font-black uppercase tracking-tighter ${
-                  user.monetizationStatus === 'approved' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500' :
-                  user.monetizationStatus === 'pending' ? 'bg-amber-500/10 border-amber-500/30 text-amber-500' :
-                  'bg-rose-500/10 border-rose-500/30 text-rose-500'
-                }`}>
-                  {user.monetizationStatus === 'approved' && <CheckCircle2 size={10} />}
-                  {user.monetizationStatus === 'pending' && <Clock size={10} />}
-                  {user.monetizationStatus === 'rejected' && <AlertCircle size={10} />}
-                  <span>{user.monetizationStatus}</span>
-                </div>
-              )}
+                <Share2 size={18} />
+              </motion.button>
             </div>
             {user.bio ? (
-              <p className="text-zinc-400 text-sm mt-2 font-medium text-center max-w-[280px] leading-relaxed">
+              <p className="text-zinc-400 text-sm mt-3 font-medium text-center max-w-[320px] leading-relaxed">
                 {user.bio}
               </p>
             ) : (
-              <p className="text-zinc-500 text-sm mt-1 font-medium italic">No bio yet</p>
+              <p className="text-zinc-500 text-sm mt-2 font-medium italic">Digital Creator & Visionary</p>
             )}
             {user.website && (
               <a 
@@ -675,76 +680,86 @@ export const Profile: React.FC<{
             </div>
           </div>
 
-          <div className="flex space-x-8 mt-8 bg-zinc-900/40 backdrop-blur-md p-5 rounded-[32px] border border-white/10 w-full max-w-sm justify-around shadow-xl shadow-black/20">
+          <div className="flex space-x-8 mt-10 glass-dark p-6 rounded-[32px] w-full max-w-sm justify-around shadow-2xl">
             <Stat 
               label="Followers" 
               value={formatNumber(user.followersCount)} 
               onClick={() => canSeeContent && setShowFollowersModal(true)}
             />
-            <div className="w-px h-8 bg-white/5 self-center" />
+            <div className="w-px h-10 bg-white/5 self-center" />
             <Stat 
               label="Following" 
               value={formatNumber(user.followingCount)} 
               onClick={() => canSeeContent && setShowFollowingModal(true)}
             />
-            <div className="w-px h-8 bg-white/5 self-center" />
+            <div className="w-px h-10 bg-white/5 self-center" />
             <Stat label="Likes" value={formatNumber(user.totalLikes)} />
           </div>
 
-          <div className="flex space-x-3 mt-8 w-full">
+          <div className="flex flex-wrap gap-3 mt-10 w-full justify-center">
             {isOwnProfile ? (
               <>
-                <button 
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={onUploadClick}
-                  className="flex-1 bg-rose-500 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-rose-600 transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-rose-500/20 flex items-center justify-center space-x-2"
+                  className="flex-1 min-w-[120px] bg-rose-500 text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center space-x-2 shadow-xl shadow-rose-500/20"
                 >
                   <UploadIcon size={14} />
                   <span>Upload</span>
-                </button>
-                <button 
+                </motion.button>
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => setShowEditModal(true)}
-                  className="flex-1 bg-white text-black py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-zinc-200 transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-white/5"
+                  className="flex-1 min-w-[120px] bg-white text-black py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl flex items-center justify-center space-x-2"
                 >
-                  Edit Profile
-                </button>
-                <button 
+                  <Edit3 size={14} />
+                  <span>Edit Profile</span>
+                </motion.button>
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => setShowSuperChatModal(true)}
-                  className="flex-1 bg-amber-500/10 text-amber-500 border border-amber-500/30 py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center space-x-2 hover:bg-amber-500/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  className="flex-1 min-w-[120px] glass-dark text-amber-500 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center space-x-2"
                 >
                   <Sparkles size={14} />
                   <span>Wallet</span>
-                </button>
-                <button className="flex-1 bg-zinc-900 text-white border border-white/5 py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center space-x-2 hover:bg-zinc-800 transition-all hover:scale-[1.02] active:scale-[0.98]">
-                  <Share2 size={14} />
-                  <span>Share</span>
-                </button>
+                </motion.button>
               </>
             ) : (
               <>
-                <button 
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={handleFollow}
                   disabled={isFollowLoading}
-                  className={`flex-[2] py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg ${
+                  className={cn(
+                    "flex-[2] min-w-[140px] py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-xl",
                     isFollowing 
-                      ? 'bg-zinc-800 text-white border border-white/5' 
+                      ? 'glass text-white' 
                       : 'bg-rose-500 text-white shadow-rose-500/30'
-                  }`}
+                  )}
                 >
                   {isFollowLoading ? <Loader2 className="animate-spin mx-auto" size={18} /> : (isFollowing ? 'Following' : 'Follow')}
-                </button>
-                <button 
+                </motion.button>
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => setShowSuperChat(true)}
-                  className="flex-1 bg-amber-500 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center space-x-2 shadow-lg shadow-amber-500/30 hover:bg-amber-600 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  className="flex-1 min-w-[120px] bg-amber-500 text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center space-x-2 shadow-xl shadow-amber-500/30"
                 >
                   <Sparkles size={14} />
                   <span>Super Chat</span>
-                </button>
-                <button 
+                </motion.button>
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => onMessageClick?.(viewingUserId)}
-                  className="flex-1 bg-zinc-900 text-white border border-white/5 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-zinc-800 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  className="flex-1 min-w-[120px] glass-dark text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest"
                 >
                   Message
-                </button>
+                </motion.button>
               </>
             )}
           </div>
@@ -1436,16 +1451,25 @@ export const Profile: React.FC<{
 
                 <div className="w-full space-y-4">
                   <div>
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Username</label>
-                    <div className="relative mt-1">
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-bold">@</span>
-                      <input 
-                        type="text"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value.toLowerCase().replace(/\s/g, ''))}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-8 pr-4 focus:outline-none focus:border-rose-500 transition-colors font-bold"
-                      />
-                    </div>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Display Name</label>
+                    <input 
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="Your name"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 px-4 mt-1 focus:outline-none focus:border-rose-500 transition-colors font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Profile Image URL</label>
+                    <input 
+                      type="text"
+                      value={editImage}
+                      onChange={(e) => setEditImage(e.target.value)}
+                      placeholder="https://example.com/image.jpg"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 px-4 mt-1 focus:outline-none focus:border-rose-500 transition-colors font-medium text-xs"
+                    />
                   </div>
 
                   <div>
@@ -1733,21 +1757,21 @@ export const Profile: React.FC<{
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setShowFollowersModal(false)}
-              className="absolute inset-0 bg-black/90 backdrop-blur-md"
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
             />
             <motion.div 
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
-              className="relative w-full max-w-md bg-zinc-950 rounded-t-[32px] p-8 pb-12 border-t border-white/10 shadow-2xl max-h-[80vh] flex flex-col"
+              className="relative w-full max-w-md glass-dark rounded-t-[40px] p-8 pb-12 shadow-2xl max-h-[80vh] flex flex-col"
             >
-              <div className="w-12 h-1.5 bg-zinc-800 rounded-full mx-auto mb-8 shrink-0" />
+              <div className="w-12 h-1.5 bg-white/10 rounded-full mx-auto mb-8 shrink-0" />
               
               <div className="flex items-center justify-between mb-8 shrink-0">
-                <h3 className="text-xl font-bold">Followers</h3>
+                <h3 className="text-2xl font-black font-display tracking-tight">Followers</h3>
                 <button 
                   onClick={() => setShowFollowersModal(false)}
-                  className="p-2 bg-zinc-900 rounded-full text-zinc-400 hover:text-white transition-colors"
+                  className="w-10 h-10 glass rounded-full flex items-center justify-center text-zinc-400 hover:text-white transition-colors"
                 >
                   <X size={20} />
                 </button>
@@ -1757,35 +1781,37 @@ export const Profile: React.FC<{
                 {isFollowersLoading ? (
                   <div className="flex flex-col items-center justify-center py-20">
                     <Loader2 className="animate-spin text-rose-500 mb-4" size={32} />
-                    <p className="text-xs text-zinc-500 font-bold uppercase tracking-widest">Loading followers...</p>
+                    <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">Loading followers...</p>
                   </div>
                 ) : followers.length === 0 ? (
-                  <div className="text-center py-10 text-zinc-500">
-                    <User size={48} className="mx-auto mb-4 opacity-20" />
-                    <p>No followers yet</p>
+                  <div className="text-center py-20 text-zinc-500">
+                    <div className="w-20 h-20 glass rounded-full flex items-center justify-center mx-auto mb-6">
+                      <User size={40} className="opacity-20" />
+                    </div>
+                    <p className="font-bold text-sm">No followers yet</p>
                   </div>
                 ) : (
                   followers.map(follower => (
                     <div 
                       key={follower.uid} 
-                      className="flex items-center justify-between p-3 bg-zinc-900/50 rounded-2xl border border-white/5 hover:border-white/10 transition-all cursor-pointer"
+                      className="flex items-center justify-between p-4 glass rounded-3xl hover:bg-white/5 transition-all cursor-pointer group"
                       onClick={() => {
                         setShowFollowersModal(false);
                         onNavigate?.(follower.uid);
                       }}
                     >
-                      <div className="flex items-center space-x-3">
-                        <div className="w-12 h-12 rounded-full overflow-hidden border border-white/10">
+                      <div className="flex items-center space-x-4">
+                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-white/10 group-hover:border-rose-500 transition-all">
                           <img src={follower.profileImage} alt={follower.name} className="w-full h-full object-cover" />
                         </div>
                         <div>
-                          <p className="font-bold text-white">@{follower.name}</p>
-                          <p className="text-[10px] text-zinc-500 uppercase tracking-widest">
+                          <p className="font-black text-white font-display">@{follower.name}</p>
+                          <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest mt-0.5">
                             {formatNumber(follower.followersCount)} Followers
                           </p>
                         </div>
                       </div>
-                      <button className="bg-rose-500 text-white px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest">
+                      <button className="glass px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all">
                         View
                       </button>
                     </div>
@@ -1796,7 +1822,7 @@ export const Profile: React.FC<{
           </div>
         )}
       </AnimatePresence>
-      
+
       {/* Following Modal */}
       <AnimatePresence>
         {showFollowingModal && (
@@ -1806,21 +1832,21 @@ export const Profile: React.FC<{
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setShowFollowingModal(false)}
-              className="absolute inset-0 bg-black/90 backdrop-blur-md"
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
             />
             <motion.div 
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
-              className="relative w-full max-w-md bg-zinc-950 rounded-t-[32px] p-8 pb-12 border-t border-white/10 shadow-2xl max-h-[80vh] flex flex-col"
+              className="relative w-full max-w-md glass-dark rounded-t-[40px] p-8 pb-12 shadow-2xl max-h-[80vh] flex flex-col"
             >
-              <div className="w-12 h-1.5 bg-zinc-800 rounded-full mx-auto mb-8 shrink-0" />
+              <div className="w-12 h-1.5 bg-white/10 rounded-full mx-auto mb-8 shrink-0" />
               
               <div className="flex items-center justify-between mb-8 shrink-0">
-                <h3 className="text-xl font-bold">Following</h3>
+                <h3 className="text-2xl font-black font-display tracking-tight">Following</h3>
                 <button 
                   onClick={() => setShowFollowingModal(false)}
-                  className="p-2 bg-zinc-900 rounded-full text-zinc-400 hover:text-white transition-colors"
+                  className="w-10 h-10 glass rounded-full flex items-center justify-center text-zinc-400 hover:text-white transition-colors"
                 >
                   <X size={20} />
                 </button>
@@ -1830,35 +1856,37 @@ export const Profile: React.FC<{
                 {isFollowingLoading ? (
                   <div className="flex flex-col items-center justify-center py-20">
                     <Loader2 className="animate-spin text-rose-500 mb-4" size={32} />
-                    <p className="text-xs text-zinc-500 font-bold uppercase tracking-widest">Loading following...</p>
+                    <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">Loading following...</p>
                   </div>
                 ) : following.length === 0 ? (
-                  <div className="text-center py-10 text-zinc-500">
-                    <User size={48} className="mx-auto mb-4 opacity-20" />
-                    <p>Not following anyone yet</p>
+                  <div className="text-center py-20 text-zinc-500">
+                    <div className="w-20 h-20 glass rounded-full flex items-center justify-center mx-auto mb-6">
+                      <User size={40} className="opacity-20" />
+                    </div>
+                    <p className="font-bold text-sm">Not following anyone yet</p>
                   </div>
                 ) : (
                   following.map(followedUser => (
                     <div 
                       key={followedUser.uid} 
-                      className="flex items-center justify-between p-3 bg-zinc-900/50 rounded-2xl border border-white/5 hover:border-white/10 transition-all cursor-pointer"
+                      className="flex items-center justify-between p-4 glass rounded-3xl hover:bg-white/5 transition-all cursor-pointer group"
                       onClick={() => {
                         setShowFollowingModal(false);
                         onNavigate?.(followedUser.uid);
                       }}
                     >
-                      <div className="flex items-center space-x-3">
-                        <div className="w-12 h-12 rounded-full overflow-hidden border border-white/10">
+                      <div className="flex items-center space-x-4">
+                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-white/10 group-hover:border-rose-500 transition-all">
                           <img src={followedUser.profileImage} alt={followedUser.name} className="w-full h-full object-cover" />
                         </div>
                         <div>
-                          <p className="font-bold text-white">@{followedUser.name}</p>
-                          <p className="text-[10px] text-zinc-500 uppercase tracking-widest">
+                          <p className="font-black text-white font-display">@{followedUser.name}</p>
+                          <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest mt-0.5">
                             {formatNumber(followedUser.followersCount)} Followers
                           </p>
                         </div>
                       </div>
-                      <button className="bg-rose-500 text-white px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest">
+                      <button className="glass px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all">
                         View
                       </button>
                     </div>
@@ -2054,8 +2082,8 @@ function Stat({ label, value, onClick }: { label: string, value: string | number
       className={cn("flex flex-col items-center", onClick && "cursor-pointer hover:opacity-80 transition-opacity")}
       onClick={onClick}
     >
-      <span className="font-bold text-lg">{value}</span>
-      <span className="text-zinc-500 text-xs">{label}</span>
+      <span className="font-black text-xl font-display tracking-tight">{value}</span>
+      <span className="text-zinc-500 text-[10px] font-black uppercase tracking-widest mt-1">{label}</span>
     </div>
   );
 }

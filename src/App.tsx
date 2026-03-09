@@ -220,6 +220,7 @@ export default function App() {
       );
       case 'discover': return (
         <Discover 
+          currentUser={user}
           onUserClick={(uid) => {
             setViewingProfileId(uid);
             setActiveTab('profile');

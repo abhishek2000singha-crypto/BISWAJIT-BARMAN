@@ -16,12 +16,12 @@ export const Logo: React.FC<{ className?: string }> = ({ className = "w-12 h-12"
 
 export const LogoText: React.FC<{ className?: string }> = ({ className = "" }) => {
   return (
-    <div className={`flex items-center font-black italic tracking-tighter text-2xl uppercase ${className}`}>
+    <div className={`flex items-center font-impact tracking-tight text-3xl uppercase ${className}`}>
       <div className="mr-2 text-amber-500">
-        <Crown size={28} className="fill-amber-500/20" />
+        <Crown size={32} className="fill-amber-500/20 drop-shadow-[0_0_10px_rgba(245,158,11,0.5)]" />
       </div>
-      <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-600">REELS</span>
-      <span className="ml-1.5 text-white">KING</span>
+      <span className="text-gradient">REELS</span>
+      <span className="ml-1.5 text-white drop-shadow-lg">KING</span>
     </div>
   );
 };
