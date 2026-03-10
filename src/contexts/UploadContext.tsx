@@ -15,14 +15,34 @@ interface UploadJob {
   videoUrl?: string;
   thumbnailUrl?: string;
   task?: UploadTask;
-  metadata?: { caption: string; hashtags: string; duration?: number; audioTrack?: AudioTrack; customBoostPrice?: number };
+  metadata?: { 
+    caption: string; 
+    hashtags: string; 
+    duration?: number; 
+    audioTrack?: AudioTrack; 
+    customBoostPrice?: number;
+    trimStart?: number;
+    trimEnd?: number;
+    filter?: string;
+    textOverlays?: any[];
+  };
   isFinalized?: boolean;
 }
 
 interface UploadContextType {
   uploads: UploadJob[];
   startUpload: (file: File, thumbnailBlob: Blob, user: User, type: 'video' | 'photo') => Promise<string>;
-  finalizeUpload: (id: string, user: User, metadata: { caption: string; hashtags: string; duration?: number; audioTrack?: AudioTrack; customBoostPrice?: number }) => Promise<void>;
+  finalizeUpload: (id: string, user: User, metadata: { 
+    caption: string; 
+    hashtags: string; 
+    duration?: number; 
+    audioTrack?: AudioTrack; 
+    customBoostPrice?: number;
+    trimStart?: number;
+    trimEnd?: number;
+    filter?: string;
+    textOverlays?: any[];
+  }) => Promise<void>;
   updateThumbnail: (id: string, thumbnailBlob: Blob, userId: string) => Promise<void>;
   removeUpload: (id: string) => void;
 }
@@ -32,7 +52,17 @@ const UploadContext = createContext<UploadContextType | undefined>(undefined);
 export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [uploads, setUploads] = useState<UploadJob[]>([]);
 
-  const saveToFirestore = useCallback(async (id: string, user: User, job: UploadJob, metadata: { caption: string; hashtags: string; duration?: number; audioTrack?: AudioTrack; customBoostPrice?: number }) => {
+  const saveToFirestore = useCallback(async (id: string, user: User, job: UploadJob, metadata: { 
+    caption: string; 
+    hashtags: string; 
+    duration?: number; 
+    audioTrack?: AudioTrack; 
+    customBoostPrice?: number;
+    trimStart?: number;
+    trimEnd?: number;
+    filter?: string;
+    textOverlays?: any[];
+  }) => {
     if (!job.videoUrl || !job.thumbnailUrl) return;
 
     setUploads(prev => prev.map(u => u.id === id ? { ...u, stage: 'saving' } : u));
@@ -43,6 +73,10 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       caption: metadata.caption || (job.type === 'video' ? 'New Reel' : 'New Post'),
       hashtags: (metadata.hashtags || '').split(' ').filter(t => t.startsWith('#')).map(t => t.slice(1)),
       duration: metadata.duration || 0,
+      trimStart: metadata.trimStart || 0,
+      trimEnd: metadata.trimEnd || metadata.duration || 0,
+      filter: metadata.filter || '',
+      textOverlays: metadata.textOverlays || [],
       audioTrack: metadata.audioTrack || null,
       customBoostPrice: metadata.customBoostPrice || null,
       status: job.type === 'photo' ? 'ready' as const : 'processing' as const,
@@ -233,7 +267,17 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return videoId;
   }, []);
 
-  const finalizeUpload = useCallback(async (id: string, user: User, metadata: { caption: string; hashtags: string; duration?: number; audioTrack?: AudioTrack; customBoostPrice?: number }) => {
+  const finalizeUpload = useCallback(async (id: string, user: User, metadata: { 
+    caption: string; 
+    hashtags: string; 
+    duration?: number; 
+    audioTrack?: AudioTrack; 
+    customBoostPrice?: number;
+    trimStart?: number;
+    trimEnd?: number;
+    filter?: string;
+    textOverlays?: any[];
+  }) => {
     const currentJob = await new Promise<UploadJob | undefined>(resolve => {
       setUploads(prev => {
         const job = prev.find(u => u.id === id);

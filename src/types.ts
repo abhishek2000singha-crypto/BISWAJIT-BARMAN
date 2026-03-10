@@ -63,6 +63,10 @@ export interface Video {
   boostExpiry: number | null;
   customBoostPrice?: number;
   duration?: number;
+  trimStart?: number;
+  trimEnd?: number;
+  filter?: string;
+  textOverlays?: any[];
   totalWatchTime?: number;
   audioTrack?: AudioTrack;
   status?: 'processing' | 'ready' | 'failed';

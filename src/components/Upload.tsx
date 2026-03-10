@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload as UploadIcon, X, Sparkles, AlertTriangle, CheckCircle2, Loader2, Eye, Music, Camera, Mic, StopCircle, Circle, RefreshCw, Play, Rocket } from 'lucide-react';
+import { Upload as UploadIcon, X, Sparkles, AlertTriangle, CheckCircle2, Loader2, Eye, Music, Camera, Mic, StopCircle, Circle, RefreshCw, Play, Rocket, Scissors } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
 import { analyzeVideoContent } from '../services/geminiService';
@@ -8,6 +8,7 @@ import { useUpload } from '../contexts/UploadContext';
 import { useError } from '../contexts/ErrorContext';
 import { cn, formatDuration } from '../utils';
 import { AudioLibrary } from './AudioLibrary';
+import { VideoEditor } from './VideoEditor';
 import { compressVideo } from '../utils/videoCompression';
 import confetti from 'canvas-confetti';
 
@@ -105,6 +106,13 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<any>(null);
   const [cameraFacing, setCameraFacing] = useState<'user' | 'environment'>('user');
+  const [showEditor, setShowEditor] = useState(false);
+  const [editData, setEditData] = useState<{
+    trimStart: number;
+    trimEnd: number;
+    filter: string;
+    textOverlays: any[];
+  } | null>(null);
 
   useEffect(() => {
     if (selectedAudio && isPlayingSelectedAudio) {
@@ -430,6 +438,8 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
     setAnalysis(null);
     setThumbnailBlob(null);
     setThumbnailPreviewUrl(null);
+    setEditData(null);
+    setShowEditor(false);
     setShowPreview(false);
     setIsPublishing(false);
     setIsPreparing(false);
@@ -449,6 +459,10 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
         caption: caption || 'New Reel',
         hashtags: hashtags || '',
         duration: duration || 0,
+        trimStart: editData?.trimStart,
+        trimEnd: editData?.trimEnd,
+        filter: editData?.filter,
+        textOverlays: editData?.textOverlays,
         audioTrack: selectedAudio || undefined,
         customBoostPrice: customBoostPrice ? parseFloat(customBoostPrice) : undefined
       });
@@ -781,14 +795,26 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
                   <video 
                     ref={videoRef}
                     src={preview!} 
-                    className="w-full h-full object-cover" 
+                    className={cn("w-full h-full object-cover", !editData?.filter.includes('(') && editData?.filter)}
+                    style={{ filter: editData?.filter.includes('(') ? editData.filter : undefined }}
                     autoPlay 
                     loop 
                     muted 
                     playsInline
                     onTimeUpdate={() => {
                       if (videoRef.current && !videoRef.current.paused) {
-                        setCurrentTime(videoRef.current.currentTime);
+                        const time = videoRef.current.currentTime;
+                        setCurrentTime(time);
+                        
+                        // Respect trim in preview
+                        if (editData) {
+                          if (time >= editData.trimEnd) {
+                            videoRef.current.currentTime = editData.trimStart;
+                          }
+                          if (time < editData.trimStart) {
+                            videoRef.current.currentTime = editData.trimStart;
+                          }
+                        }
                       }
                     }}
                   />
@@ -920,6 +946,34 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
                   </div>
                 </div>
 
+                {/* Text Overlays Preview */}
+                {editData?.textOverlays?.map((overlay: any) => (
+                  <div
+                    key={overlay.id}
+                    style={{ 
+                      left: `${overlay.x}%`, 
+                      top: `${overlay.y}%`, 
+                      color: overlay.color,
+                      fontSize: `${overlay.fontSize * 0.6}px`, // Scale down for preview
+                      transform: 'translate(-50%, -50%)',
+                      textShadow: '0 1px 2px rgba(0,0,0,0.5)'
+                    }}
+                    className="absolute pointer-events-none select-none whitespace-nowrap font-bold"
+                  >
+                    {overlay.text}
+                  </div>
+                ))}
+
+                {/* Edit Button */}
+                {file?.type.startsWith('video/') && (
+                  <button 
+                    onClick={() => setShowEditor(true)}
+                    className="absolute top-6 left-6 bg-black/50 hover:bg-rose-500 p-2.5 rounded-full text-white backdrop-blur-md transition-all duration-300 hover:scale-110 active:scale-95 border border-white/10 z-30"
+                  >
+                    <Scissors size={18} />
+                  </button>
+                )}
+                
                 <button 
                   onClick={() => { setFile(null); setAnalysis(null); setDuration(null); }}
                   className="absolute top-6 right-6 bg-black/50 hover:bg-rose-500 p-2.5 rounded-full text-white backdrop-blur-md transition-all duration-300 hover:scale-110 active:scale-95 border border-white/10"
@@ -1456,6 +1510,25 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
               </div>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Video Editor Modal */}
+      <AnimatePresence>
+        {showEditor && file && preview && (
+          <VideoEditor 
+            videoUrl={preview}
+            duration={duration || 0}
+            initialData={editData || undefined}
+            onSave={(data) => {
+              setEditData(data);
+              setShowEditor(false);
+              if (videoRef.current) {
+                videoRef.current.currentTime = data.trimStart;
+              }
+            }}
+            onCancel={() => setShowEditor(false)}
+          />
         )}
       </AnimatePresence>
     </div>

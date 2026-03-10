@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { doc, getDoc, setDoc, deleteDoc, updateDoc, increment, writeBatch, query, collection, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 import { Video, User } from '../types';
-import { formatNumber, formatDuration } from '../utils';
+import { cn, formatNumber, formatDuration } from '../utils';
 import { Comments } from './Comments';
 import { formatDistanceToNow } from 'date-fns';
 import { SuperChatModal } from './SuperChatModal';
@@ -136,15 +136,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
         trackInteraction(auth.currentUser.uid, video.id, video.userId, 'skip');
       }
     }
-
-    const handleTimeUpdate = () => {
-      const p = (videoElement.currentTime / videoElement.duration) * 100;
-      setProgress(p);
-    };
-
-    videoElement.addEventListener('timeupdate', handleTimeUpdate);
-    return () => videoElement.removeEventListener('timeupdate', handleTimeUpdate);
-  }, []);
+  }, [isActive, video.id, video.userId]);
 
   useEffect(() => {
     if (video.audioTrack && isActive && shouldLoad) {
@@ -228,7 +220,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
         incrementView();
       } else {
         videoRef.current.pause();
-        videoRef.current.currentTime = 0;
+        videoRef.current.currentTime = video.trimStart || 0;
         setIsPlaying(false);
       }
     } else if (video.type === 'photo' && isActive) {
@@ -578,11 +570,36 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
           ref={videoRef}
           src={shouldLoad && video.videoUrl ? video.videoUrl : ''}
           poster={video.thumbnailUrl}
-          className="h-full w-full object-contain"
+          className={cn("h-full w-full object-contain", video.filter && !video.filter.includes('(') && video.filter)}
+          style={{ filter: video.filter?.includes('(') ? video.filter : undefined }}
           loop
           playsInline
           muted={isMuted}
           preload="auto"
+          onTimeUpdate={() => {
+            if (videoRef.current) {
+              const time = videoRef.current.currentTime;
+              
+              // Respect trim
+              if (video.trimStart !== undefined && video.trimEnd !== undefined) {
+                if (time >= video.trimEnd) {
+                  videoRef.current.currentTime = video.trimStart;
+                }
+                if (time < video.trimStart) {
+                  videoRef.current.currentTime = video.trimStart;
+                }
+              }
+
+              // Update progress bar (if any)
+              const duration = video.trimEnd && video.trimStart 
+                ? video.trimEnd - video.trimStart 
+                : videoRef.current.duration;
+              const current = video.trimStart 
+                ? time - video.trimStart 
+                : time;
+              setProgress((current / duration) * 100);
+            }
+          }}
         />
       ) : (
         <img
@@ -595,6 +612,24 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
 
       {/* Overlay UI */}
       <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/80 pointer-events-none" />
+
+      {/* Text Overlays */}
+      {video.textOverlays?.map((overlay: any) => (
+        <div
+          key={overlay.id}
+          style={{ 
+            left: `${overlay.x}%`, 
+            top: `${overlay.y}%`, 
+            color: overlay.color,
+            fontSize: `${overlay.fontSize}px`,
+            transform: 'translate(-50%, -50%)',
+            textShadow: '0 2px 4px rgba(0,0,0,0.5)'
+          }}
+          className="absolute pointer-events-none select-none whitespace-nowrap font-bold z-10"
+        >
+          {overlay.text}
+        </div>
+      ))}
 
       {/* Muted Overlay */}
       {isMuted && isActive && video.type === 'video' && (
@@ -1132,6 +1167,3 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
   );
 };
 
-function cn(...inputs: any[]) {
-  return inputs.filter(Boolean).join(' ');
-}
