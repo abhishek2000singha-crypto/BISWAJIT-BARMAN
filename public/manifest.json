@@ -1,0 +1,21 @@
+{
+  "name": "REELS KING",
+  "short_name": "REELS KING",
+  "description": "A production-ready Reels platform with AI-powered content moderation, video boosting via Razorpay, and creator monetization.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#f43f5e",
+  "icons": [
+    {
+      "src": "https://picsum.photos/seed/reelsking/192/192",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://picsum.photos/seed/reelsking/512/512",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

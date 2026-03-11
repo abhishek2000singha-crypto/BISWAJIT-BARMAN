@@ -2255,6 +2255,13 @@ export const Profile: React.FC<{
           />
         )}
       </AnimatePresence>
+      
+      {/* App Version Info */}
+      <div className="mt-12 mb-8 flex flex-col items-center justify-center opacity-20">
+        <Logo className="w-6 h-6 grayscale mb-2" />
+        <p className="text-[8px] font-black uppercase tracking-[0.3em]">REELS KING v1.0.0</p>
+        <p className="text-[6px] font-bold uppercase tracking-widest mt-1">Production Ready Build</p>
+      </div>
     </div>
   );
 };
