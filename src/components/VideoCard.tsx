@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Heart, MessageCircle, Share2, Music2, UserPlus, CheckCircle2, Check, Eye, X, Sparkles, Play, Pause, Volume2, VolumeX, Loader2, Rocket, Flag, XCircle, Edit3 } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Music2, UserPlus, CheckCircle2, Check, Eye, X, Sparkles, Play, Pause, Volume2, VolumeX, Loader2, Rocket, Flag, XCircle, Edit3, Settings, ChevronRight, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { doc, getDoc, setDoc, deleteDoc, updateDoc, increment, writeBatch, query, collection, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
-import { Video, User } from '../types';
+import { Video, User, TextOverlay } from '../types';
 import { cn, formatNumber, formatDuration } from '../utils';
 import { Comments } from './Comments';
 import { formatDistanceToNow } from 'date-fns';
@@ -47,6 +47,14 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
   const [editHashtags, setEditHashtags] = useState(video.hashtags?.map(t => `#${t}`).join(' ') || '');
   const [editBoostPrice, setEditBoostPrice] = useState(video.customBoostPrice?.toString() || '');
   const [isSaving, setIsSaving] = useState(false);
+  const [currentResolution, setCurrentResolution] = useState<string>('auto');
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(true);
+  const [volume, setVolume] = useState(1);
+  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const lastTimeRef = useRef<number>(0);
   const startTimeRef = useRef<number>(Date.now());
   const playPromiseRef = useRef<Promise<void> | null>(null);
   const backgroundAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -61,6 +69,24 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
     });
     return () => unsubscribe();
   }, [initialVideo.id]);
+
+  useEffect(() => {
+    if (videoRef.current && shouldLoad && currentResolution) {
+      // Save current time before switching to new resolution
+      if (videoRef.current.currentTime > 0) {
+        lastTimeRef.current = videoRef.current.currentTime;
+      }
+      
+      // The src will change because getVideoUrl() is called in the render
+      // We call load() to ensure the video element picks up the new source
+      videoRef.current.load();
+      
+      // If it was playing, try to resume
+      if (isPlaying) {
+        videoRef.current.play().catch(() => {});
+      }
+    }
+  }, [currentResolution]);
 
   useEffect(() => {
     const fetchCreator = async () => {
@@ -200,6 +226,16 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
           });
         }
         setIsPlaying(true);
+
+        // Restore playback position
+        const savedTime = localStorage.getItem(`video_playback_pos_${video.id}`);
+        if (savedTime && videoRef.current) {
+          const time = parseFloat(savedTime);
+          if (!isNaN(time) && time > (video.trimStart || 0)) {
+            videoRef.current.currentTime = time;
+          }
+        }
+
         // Increment view count
         const incrementView = async () => {
           try {
@@ -219,6 +255,9 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
         };
         incrementView();
       } else {
+        if (videoRef.current && videoRef.current.currentTime > 0) {
+          localStorage.setItem(`video_playback_pos_${video.id}`, videoRef.current.currentTime.toString());
+        }
         videoRef.current.pause();
         videoRef.current.currentTime = video.trimStart || 0;
         setIsPlaying(false);
@@ -247,6 +286,12 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
     if (isActive && isPlaying && video.type === 'video') {
       watchInterval = setInterval(async () => {
         secondsWatched++;
+        
+        // Save playback position every 2 seconds
+        if (secondsWatched % 2 === 0 && videoRef.current) {
+          localStorage.setItem(`video_playback_pos_${video.id}`, videoRef.current.currentTime.toString());
+        }
+
         try {
           const videoRef = doc(db, 'videos', video.id);
           await updateDoc(videoRef, { totalWatchTime: increment(1) });
@@ -265,9 +310,49 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
       }, 1000);
     }
     return () => {
-      if (watchInterval) clearInterval(watchInterval);
+      if (watchInterval) {
+        clearInterval(watchInterval);
+        // Save playback position on unmount or deactivation
+        if (videoRef.current && videoRef.current.currentTime > 0) {
+          localStorage.setItem(`video_playback_pos_${video.id}`, videoRef.current.currentTime.toString());
+        }
+      }
     };
   }, [isActive, isPlaying, video.id, video.type]);
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (!videoRef.current || video.type !== 'video') return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = x / rect.width;
+    
+    const duration = video.trimEnd && video.trimStart 
+      ? video.trimEnd - video.trimStart 
+      : videoRef.current.duration;
+    
+    const newTime = (percentage * duration) + (video.trimStart || 0);
+    videoRef.current.currentTime = newTime;
+    setProgress(percentage * 100);
+  };
+
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    const newVolume = parseFloat(e.target.value);
+    setVolume(newVolume);
+    if (videoRef.current) {
+      videoRef.current.volume = newVolume;
+      if (newVolume > 0 && isMuted) {
+        onMuteToggle?.();
+      } else if (newVolume === 0 && !isMuted) {
+        onMuteToggle?.();
+      }
+    }
+    if (backgroundAudioRef.current) {
+      backgroundAudioRef.current.volume = newVolume;
+    }
+  };
 
   const togglePlay = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -501,9 +586,37 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
     }
   };
 
+  useEffect(() => {
+    if (videoRef.current) {
+      lastTimeRef.current = videoRef.current.currentTime;
+    }
+  }, [currentResolution]);
+
   const toggleMute = (e: React.MouseEvent) => {
     e.stopPropagation();
     onMuteToggle?.();
+  };
+
+  const getVideoUrl = () => {
+    if (!video.resolutions || Object.keys(video.resolutions).length === 0) {
+      return video.videoUrl;
+    }
+
+    if (currentResolution === 'auto') {
+      const connection = (navigator as any).connection;
+      const type = connection?.effectiveType || '4g';
+      
+      // Simple heuristic for auto selection
+      if (type.includes('4g')) {
+        return video.resolutions['1080p'] || video.resolutions['720p'] || video.videoUrl;
+      } else if (type.includes('3g')) {
+        return video.resolutions['480p'] || video.resolutions['360p'] || video.videoUrl;
+      } else {
+        return video.resolutions['360p'] || video.resolutions['240p'] || video.videoUrl;
+      }
+    }
+    
+    return video.resolutions[currentResolution] || video.videoUrl;
   };
 
   const handleUpdateVideo = async () => {
@@ -566,16 +679,52 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
       onClick={togglePlay}
     >
       {video.type === 'video' ? (
-        <video
-          ref={videoRef}
-          src={shouldLoad && video.videoUrl ? video.videoUrl : ''}
-          poster={video.thumbnailUrl}
-          className={cn("h-full w-full object-contain", video.filter && !video.filter.includes('(') && video.filter)}
-          style={{ filter: video.filter?.includes('(') ? video.filter : undefined }}
-          loop
-          playsInline
-          muted={isMuted}
-          preload="auto"
+        <div className="relative h-full w-full flex items-center justify-center">
+          {/* Blurred Thumbnail Loading State */}
+          <AnimatePresence>
+            {isBuffering && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 z-10"
+              >
+                <img
+                  src={video.thumbnailUrl}
+                  className="h-full w-full object-cover blur-2xl scale-110 opacity-50"
+                  alt=""
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-12 h-12 border-4 border-rose-500/20 border-t-rose-500 rounded-full animate-spin" />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <motion.video
+            ref={videoRef}
+            src={shouldLoad ? getVideoUrl() : ''}
+            poster={video.thumbnailUrl}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: isBuffering ? 0 : 1 }}
+            transition={{ duration: 0.5 }}
+            className={cn("h-full w-full object-contain relative z-0", video.filter && !video.filter.includes('(') && video.filter)}
+            style={{ filter: video.filter?.includes('(') ? video.filter : undefined }}
+            loop
+            playsInline
+            muted={isMuted}
+            preload="auto"
+            onWaiting={() => setIsBuffering(true)}
+            onPlaying={() => setIsBuffering(false)}
+            onCanPlay={() => setIsBuffering(false)}
+            onLoadedMetadata={() => {
+            if (videoRef.current && lastTimeRef.current > 0) {
+              videoRef.current.currentTime = lastTimeRef.current;
+              if (isPlaying) videoRef.current.play().catch(() => {});
+              lastTimeRef.current = 0;
+            }
+          }}
           onTimeUpdate={() => {
             if (videoRef.current) {
               const time = videoRef.current.currentTime;
@@ -597,10 +746,14 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
               const current = video.trimStart 
                 ? time - video.trimStart 
                 : time;
+              
+              setCurrentTime(current);
+              setDuration(duration);
               setProgress((current / duration) * 100);
             }
           }}
         />
+        </div>
       ) : (
         <img
           src={shouldLoad ? video.videoUrl : video.thumbnailUrl}
@@ -613,8 +766,30 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
       {/* Overlay UI */}
       <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/80 pointer-events-none" />
 
+      {/* Safety Warning Overlay */}
+      {video.moderation && !video.moderation.isSafe && (
+        <div className="absolute inset-0 z-30 bg-zinc-950/90 backdrop-blur-xl flex flex-col items-center justify-center p-8 text-center">
+          <div className="w-20 h-20 bg-rose-500/20 rounded-full flex items-center justify-center mb-6">
+            <AlertTriangle size={40} className="text-rose-500" />
+          </div>
+          <h3 className="text-xl font-black mb-2 uppercase tracking-tighter italic">Content Warning</h3>
+          <p className="text-zinc-400 text-sm mb-8 max-w-[280px]">
+            This content has been flagged by our AI moderation system:
+            <span className="block mt-2 text-rose-400 font-bold">
+              {video.moderation.safetyReason || "Violates community guidelines"}
+            </span>
+          </p>
+          <button 
+            onClick={(e) => { e.stopPropagation(); setIsHidden(true); }}
+            className="px-8 py-3 bg-white text-black rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-zinc-200 transition-colors"
+          >
+            Hide Content
+          </button>
+        </div>
+      )}
+
       {/* Text Overlays */}
-      {video.textOverlays?.map((overlay: any) => (
+      {video.textOverlays?.map((overlay: TextOverlay) => (
         <div
           key={overlay.id}
           style={{ 
@@ -622,6 +797,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
             top: `${overlay.y}%`, 
             color: overlay.color,
             fontSize: `${overlay.fontSize}px`,
+            fontFamily: overlay.fontFamily || 'var(--font-sans)',
             transform: 'translate(-50%, -50%)',
             textShadow: '0 2px 4px rgba(0,0,0,0.5)'
           }}
@@ -667,29 +843,125 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
           }}
           className="absolute top-24 right-4 z-10 flex flex-col items-end space-y-3"
         >
-          <motion.div 
-            animate={{ 
-              x: isActive ? 0 : 20, 
-              opacity: isActive ? 1 : 0 
-            }}
-            className="glass-dark px-3 py-1.5 rounded-xl flex items-center space-x-2 shadow-2xl"
-          >
-            <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-            <span className="text-[10px] font-black text-white tracking-widest font-display">4K ULTRA HD</span>
-          </motion.div>
-          
+          {/* Play/Pause Button */}
           <motion.button 
             animate={{ 
               x: isActive ? 0 : 20, 
               opacity: isActive ? 1 : 0 
             }}
-            transition={{ delay: 0.1 }}
-            onClick={toggleMute}
-            aria-label={isMuted ? "Unmute video" : "Mute video"}
+            transition={{ delay: 0.05 }}
+            onClick={togglePlay}
+            aria-label={isPlaying ? "Pause video" : "Play video"}
             className="glass-dark p-3 rounded-full text-white hover:bg-white/20 transition-all shadow-2xl active:scale-90"
           >
-            {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+            {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-0.5" />}
           </motion.button>
+
+          {video.resolutions && Object.keys(video.resolutions).length > 0 && (
+            <div className="relative">
+              <motion.button 
+                animate={{ 
+                  x: isActive ? 0 : 20, 
+                  opacity: isActive ? 1 : 0 
+                }}
+                onClick={(e) => { e.stopPropagation(); setShowQualityMenu(!showQualityMenu); }}
+                className="glass-dark px-3 py-1.5 rounded-xl flex items-center space-x-2 shadow-2xl hover:bg-white/10 transition-colors"
+              >
+                <div className={cn(
+                  "w-1.5 h-1.5 rounded-full animate-pulse",
+                  currentResolution === 'auto' ? "bg-emerald-500" : "bg-rose-500"
+                )} />
+                <span className="text-[10px] font-black text-white tracking-widest font-display uppercase">
+                  {currentResolution === 'auto' ? 'Auto' : currentResolution}
+                </span>
+                <Settings size={10} className="text-white/50" />
+              </motion.button>
+
+              <AnimatePresence>
+                {showQualityMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9, x: 10 }}
+                    animate={{ opacity: 1, scale: 1, x: 0 }}
+                    exit={{ opacity: 0, scale: 0.9, x: 10 }}
+                    className="absolute right-0 mt-2 bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-2xl p-2 w-36 shadow-2xl z-50 overflow-hidden"
+                  >
+                    <div className="px-3 py-2 border-bottom border-white/5 mb-1">
+                      <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Video Quality</p>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setCurrentResolution('auto'); setShowQualityMenu(false); }}
+                      className={cn(
+                        "w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all",
+                        currentResolution === 'auto' ? "bg-rose-500/20 text-rose-500" : "hover:bg-white/5 text-zinc-400"
+                      )}
+                    >
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Auto</span>
+                        <span className="text-[8px] text-zinc-500 font-medium">Best for network</span>
+                      </div>
+                      {currentResolution === 'auto' && <Check size={12} />}
+                    </button>
+                    
+                    {video.resolutions && Object.keys(video.resolutions)
+                      .sort((a, b) => parseInt(b) - parseInt(a))
+                      .map((res) => (
+                        <button
+                          key={res}
+                          onClick={(e) => { e.stopPropagation(); setCurrentResolution(res); setShowQualityMenu(false); }}
+                          className={cn(
+                            "w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all",
+                            currentResolution === res ? "bg-rose-500/20 text-rose-500" : "hover:bg-white/5 text-zinc-400"
+                          )}
+                        >
+                          <span className="text-[10px] font-bold uppercase tracking-wider">{res}</span>
+                          {currentResolution === res && <Check size={12} />}
+                        </button>
+                      ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+          
+          <div className="relative group/volume">
+            <motion.button 
+              animate={{ 
+                x: isActive ? 0 : 20, 
+                opacity: isActive ? 1 : 0 
+              }}
+              transition={{ delay: 0.1 }}
+              onClick={toggleMute}
+              onMouseEnter={() => setShowVolumeSlider(true)}
+              aria-label={isMuted ? "Unmute video" : "Mute video"}
+              className="glass-dark p-3 rounded-full text-white hover:bg-white/20 transition-all shadow-2xl active:scale-90"
+            >
+              {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
+            </motion.button>
+
+            <AnimatePresence>
+              {showVolumeSlider && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9, x: 10 }}
+                  animate={{ opacity: 1, scale: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, x: 10 }}
+                  onMouseLeave={() => setShowVolumeSlider(false)}
+                  className="absolute right-full mr-4 top-1/2 -translate-y-1/2 glass-dark p-4 rounded-2xl shadow-2xl z-50 flex items-center space-x-3 w-40"
+                >
+                  <VolumeX size={14} className="text-white/50" />
+                  <input 
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={isMuted ? 0 : volume}
+                    onChange={handleVolumeChange}
+                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-rose-500"
+                  />
+                  <Volume2 size={14} className="text-white/50" />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </motion.div>
 
       {/* Live Super Chat Notification */}
@@ -1003,14 +1275,30 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
         </motion.div>
       </motion.div>
 
-      {/* Progress Bar */}
+      {/* Time Display */}
+      {video.type === 'video' && isActive && (
+        <div className="absolute bottom-4 left-4 z-40 pointer-events-none">
+          <div className="glass-dark px-2 py-1 rounded-lg text-[10px] font-mono text-white/90 shadow-xl border border-white/10">
+            {formatDuration(currentTime)} / {formatDuration(duration)}
+          </div>
+        </div>
+      )}
+
+      {/* Seek Bar */}
       {video.type === 'video' && (
-        <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-white/5 z-20">
-          <motion.div 
-            className="h-full bg-gradient-to-r from-rose-600 via-rose-500 to-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.5)]"
-            style={{ width: `${progress}%` }}
-            transition={{ type: 'spring', bounce: 0, duration: 0.1 }}
-          />
+        <div 
+          className="absolute bottom-0 left-0 right-0 h-3 bg-transparent z-30 cursor-pointer group/seek"
+          onClick={handleSeek}
+        >
+          <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-white/5 group-hover/seek:h-full transition-all duration-200">
+            <motion.div 
+              className="h-full bg-gradient-to-r from-rose-600 via-rose-500 to-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.5)] relative"
+              style={{ width: `${progress}%` }}
+              transition={{ type: 'spring', bounce: 0, duration: 0.1 }}
+            >
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg scale-0 group-hover/seek:scale-100 transition-transform duration-200" />
+            </motion.div>
+          </div>
         </div>
       )}
 

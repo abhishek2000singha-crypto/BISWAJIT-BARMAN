@@ -43,6 +43,16 @@ export interface SuperChat {
   createdAt: number;
 }
 
+export interface TextOverlay {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  color: string;
+  fontSize: number;
+  fontFamily?: string;
+}
+
 export interface Video {
   id: string;
   userId: string;
@@ -66,13 +76,21 @@ export interface Video {
   trimStart?: number;
   trimEnd?: number;
   filter?: string;
-  textOverlays?: any[];
+  textOverlays?: TextOverlay[];
   totalWatchTime?: number;
   audioTrack?: AudioTrack;
   status?: 'processing' | 'ready' | 'failed';
   adaptiveStreaming?: boolean;
   resolutions?: {
     [key: string]: string;
+  };
+  moderation?: {
+    isSafe: boolean;
+    safetyReason?: string;
+    analyzedAt: number;
+    caption?: string;
+    hashtags?: string[];
+    seoTitle?: string;
   };
   transcodedAt?: number;
   createdAt: number;

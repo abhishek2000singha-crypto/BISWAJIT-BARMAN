@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useCallback } from 'react';
 import { ref, uploadBytesResumable, getDownloadURL, uploadBytes, UploadTask } from 'firebase/storage';
 import { collection, addDoc, setDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, storage } from '../services/firebase';
-import { User, AudioTrack } from '../types';
+import { User, AudioTrack, TextOverlay } from '../types';
 
 interface UploadJob {
   id: string;
@@ -14,6 +14,7 @@ interface UploadJob {
   error?: string;
   videoUrl?: string;
   thumbnailUrl?: string;
+  resolutions?: { [key: string]: string };
   task?: UploadTask;
   metadata?: { 
     caption: string; 
@@ -24,7 +25,15 @@ interface UploadJob {
     trimStart?: number;
     trimEnd?: number;
     filter?: string;
-    textOverlays?: any[];
+    textOverlays?: TextOverlay[];
+    moderation?: {
+      isSafe: boolean;
+      safetyReason?: string;
+      analyzedAt: number;
+      caption?: string;
+      hashtags?: string[];
+      seoTitle?: string;
+    };
   };
   isFinalized?: boolean;
 }
@@ -41,7 +50,15 @@ interface UploadContextType {
     trimStart?: number;
     trimEnd?: number;
     filter?: string;
-    textOverlays?: any[];
+    textOverlays?: TextOverlay[];
+    moderation?: {
+      isSafe: boolean;
+      safetyReason?: string;
+      analyzedAt: number;
+      caption?: string;
+      hashtags?: string[];
+      seoTitle?: string;
+    };
   }) => Promise<void>;
   updateThumbnail: (id: string, thumbnailBlob: Blob, userId: string) => Promise<void>;
   removeUpload: (id: string) => void;
@@ -61,7 +78,15 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     trimStart?: number;
     trimEnd?: number;
     filter?: string;
-    textOverlays?: any[];
+    textOverlays?: TextOverlay[];
+    moderation?: {
+      isSafe: boolean;
+      safetyReason?: string;
+      analyzedAt: number;
+      caption?: string;
+      hashtags?: string[];
+      seoTitle?: string;
+    };
   }) => {
     if (!job.videoUrl || !job.thumbnailUrl) return;
 
@@ -70,6 +95,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const videoData = {
       videoUrl: job.videoUrl,
       thumbnailUrl: job.thumbnailUrl,
+      resolutions: job.resolutions || null,
       caption: metadata.caption || (job.type === 'video' ? 'New Reel' : 'New Post'),
       hashtags: (metadata.hashtags || '').split(' ').filter(t => t.startsWith('#')).map(t => t.slice(1)),
       duration: metadata.duration || 0,
@@ -79,6 +105,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       textOverlays: metadata.textOverlays || [],
       audioTrack: metadata.audioTrack || null,
       customBoostPrice: metadata.customBoostPrice || null,
+      moderation: metadata.moderation || null,
       status: job.type === 'photo' ? 'ready' as const : 'processing' as const,
       updatedAt: Date.now()
     };
@@ -114,9 +141,20 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }).catch(() => null);
         
         if (!response || !response.ok) {
-          console.warn("Transcoding trigger failed or backend unavailable. Setting status to ready.");
+          console.warn("Transcoding trigger failed or backend unavailable. Setting status to ready with mock resolutions for adaptive streaming demo.");
+          
+          // Mock resolutions for demonstration of adaptive streaming
+          const mockResolutions = {
+            '1080p': job.videoUrl,
+            '720p': job.videoUrl,
+            '480p': job.videoUrl,
+            '360p': job.videoUrl
+          };
+
           await updateDoc(videoRef_fs, { 
             status: 'ready',
+            resolutions: mockResolutions,
+            adaptiveStreaming: true,
             updatedAt: Date.now()
           });
         }
@@ -276,7 +314,15 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     trimStart?: number;
     trimEnd?: number;
     filter?: string;
-    textOverlays?: any[];
+    textOverlays?: TextOverlay[];
+    moderation?: {
+      isSafe: boolean;
+      safetyReason?: string;
+      analyzedAt: number;
+      caption?: string;
+      hashtags?: string[];
+      seoTitle?: string;
+    };
   }) => {
     const currentJob = await new Promise<UploadJob | undefined>(resolve => {
       setUploads(prev => {

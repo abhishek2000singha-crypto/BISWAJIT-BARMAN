@@ -3,7 +3,7 @@ import { Upload as UploadIcon, X, Sparkles, AlertTriangle, CheckCircle2, Loader2
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
 import { analyzeVideoContent } from '../services/geminiService';
-import { User, AudioTrack } from '../types';
+import { User, AudioTrack, TextOverlay } from '../types';
 import { useUpload } from '../contexts/UploadContext';
 import { useError } from '../contexts/ErrorContext';
 import { cn, formatDuration } from '../utils';
@@ -111,7 +111,7 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
     trimStart: number;
     trimEnd: number;
     filter: string;
-    textOverlays: any[];
+    textOverlays: TextOverlay[];
   } | null>(null);
 
   useEffect(() => {
@@ -289,7 +289,7 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
     }
   };
 
-  const startRecording = async () => {
+  const openCamera = async () => {
     try {
       const currentStream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -300,11 +300,35 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
         audio: true
       });
       setStream(currentStream);
-      if (videoRef.current) videoRef.current.srcObject = currentStream;
-      
-      const mediaRecorder = new MediaRecorder(currentStream, {
-        mimeType: 'video/webm;codecs=vp9'
-      });
+      // Use a small delay to ensure the ref is attached if we just switched to the recording view
+      setTimeout(() => {
+        if (recordingVideoRef.current) {
+          recordingVideoRef.current.srcObject = currentStream;
+        }
+      }, 100);
+    } catch (error) {
+      console.error("Failed to open camera", error);
+      showError("Could not access camera/microphone. Please check permissions.");
+    }
+  };
+
+  const startRecording = () => {
+    if (!stream) {
+      openCamera().then(() => startRecording());
+      return;
+    }
+    
+    try {
+      // Check supported mime types for better cross-browser compatibility
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') 
+        ? 'video/webm;codecs=vp9' 
+        : MediaRecorder.isTypeSupported('video/webm')
+          ? 'video/webm'
+          : MediaRecorder.isTypeSupported('video/mp4')
+            ? 'video/mp4'
+            : '';
+        
+      const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       
       mediaRecorderRef.current = mediaRecorder;
       recordedChunksRef.current = [];
@@ -321,7 +345,7 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
         processFile(recordedFile);
         
         // Cleanup stream
-        currentStream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach(track => track.stop());
         setStream(null);
         setIsRecording(false);
         setRecordingTime(0);
@@ -343,7 +367,7 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
       
     } catch (error) {
       console.error("Failed to start recording", error);
-      showError("Could not access camera/microphone. Please check permissions.");
+      showError("Failed to start recording. Please try again.");
     }
   };
 
@@ -359,11 +383,42 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
   const toggleCamera = async () => {
     const newFacing = cameraFacing === 'user' ? 'environment' : 'user';
     setCameraFacing(newFacing);
-    if (isRecording || stream) {
-      // Restart stream with new facing mode
-      stopRecording();
-      // Wait a bit for cleanup
-      setTimeout(() => startRecording(), 500);
+    
+    // If we have an active stream, we need to restart it with the new camera
+    if (stream) {
+      const wasRecording = isRecording;
+      if (wasRecording) {
+        stopRecording();
+      }
+      
+      // Stop current tracks
+      stream.getTracks().forEach(t => t.stop());
+      
+      // Re-open camera with new facing mode
+      try {
+        const currentStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 720 },
+            height: { ideal: 1280 },
+            facingMode: newFacing
+          },
+          audio: true
+        });
+        setStream(currentStream);
+        if (recordingVideoRef.current) {
+          recordingVideoRef.current.srcObject = currentStream;
+        }
+        
+        // If it was recording, we automatically resume recording with the new stream
+        // Note: This creates a new file, but it's better than nothing.
+        if (wasRecording) {
+          // Small delay to ensure state updates
+          setTimeout(() => startRecording(), 300);
+        }
+      } catch (error) {
+        console.error("Failed to switch camera", error);
+        showError("Could not switch camera.");
+      }
     }
   };
 
@@ -464,7 +519,15 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
         filter: editData?.filter,
         textOverlays: editData?.textOverlays,
         audioTrack: selectedAudio || undefined,
-        customBoostPrice: customBoostPrice ? parseFloat(customBoostPrice) : undefined
+        customBoostPrice: customBoostPrice ? parseFloat(customBoostPrice) : undefined,
+        moderation: analysis ? {
+          isSafe: analysis.isSafe,
+          safetyReason: analysis.safetyReason,
+          analyzedAt: Date.now(),
+          caption: analysis.caption,
+          hashtags: analysis.hashtags,
+          seoTitle: analysis.seoTitle
+        } : undefined
       });
       showSuccess("Reel published successfully!");
       resetForm();
@@ -734,7 +797,7 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
 
               <div className="grid grid-cols-2 gap-4">
                 <button 
-                  onClick={startRecording}
+                  onClick={openCamera}
                   className="bg-zinc-900 border border-white/5 p-6 rounded-[32px] flex flex-col items-center justify-center space-y-3 hover:bg-zinc-800 transition-all group"
                 >
                   <div className="w-12 h-12 bg-rose-500/10 rounded-2xl flex items-center justify-center text-rose-500 group-hover:scale-110 transition-transform">
@@ -947,7 +1010,7 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
                 </div>
 
                 {/* Text Overlays Preview */}
-                {editData?.textOverlays?.map((overlay: any) => (
+                {editData?.textOverlays?.map((overlay: TextOverlay) => (
                   <div
                     key={overlay.id}
                     style={{ 
@@ -955,6 +1018,7 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
                       top: `${overlay.y}%`, 
                       color: overlay.color,
                       fontSize: `${overlay.fontSize * 0.6}px`, // Scale down for preview
+                      fontFamily: overlay.fontFamily || 'var(--font-sans)',
                       transform: 'translate(-50%, -50%)',
                       textShadow: '0 1px 2px rgba(0,0,0,0.5)'
                     }}

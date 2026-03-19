@@ -2,15 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Scissors, Sparkles, Type, Check, Play, Pause, RotateCcw, Trash2, Move } from 'lucide-react';
 import { cn, formatDuration } from '../utils';
-
-interface TextOverlay {
-  id: string;
-  text: string;
-  x: number;
-  y: number;
-  color: string;
-  fontSize: number;
-}
+import { TextOverlay } from '../types';
 
 interface VideoEditorProps {
   videoUrl: string;
@@ -40,6 +32,19 @@ const FILTERS = [
   { name: 'Dramatic', class: 'contrast(1.5) grayscale(0.5)' },
   { name: 'Vibrant', class: 'saturate(2) contrast(1.1)' },
   { name: 'Vintage', class: 'sepia(0.3) contrast(0.8) brightness(0.9)' },
+];
+
+const FONTS = [
+  { name: 'Sans', family: 'var(--font-sans)' },
+  { name: 'Display', family: 'var(--font-display)' },
+  { name: 'Impact', family: 'var(--font-impact)' },
+  { name: 'Mono', family: 'var(--font-mono)' },
+  { name: 'Serif', family: 'serif' },
+];
+
+const COLORS = [
+  '#ffffff', '#000000', '#f43f5e', '#3b82f6', '#10b981', '#f59e0b', 
+  '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#78716c', '#475569'
 ];
 
 export const VideoEditor: React.FC<VideoEditorProps> = ({
@@ -100,7 +105,8 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
       x: 50,
       y: 50,
       color: '#ffffff',
-      fontSize: 24
+      fontSize: 24,
+      fontFamily: 'var(--font-sans)'
     };
     setTextOverlays([...textOverlays, newText]);
     setEditingTextId(newText.id);
@@ -190,15 +196,22 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
                 top: `${overlay.y}%`, 
                 color: overlay.color,
                 fontSize: `${overlay.fontSize}px`,
+                fontFamily: overlay.fontFamily || 'var(--font-sans)',
                 transform: 'translate(-50%, -50%)',
                 textShadow: '0 2px 4px rgba(0,0,0,0.5)'
               }}
               className={cn(
-                "absolute cursor-move select-none whitespace-nowrap font-bold px-2 py-1 rounded",
-                editingTextId === overlay.id && "ring-2 ring-rose-500 bg-black/20"
+                "absolute cursor-move select-none whitespace-nowrap font-bold px-2 py-1 rounded transition-all",
+                editingTextId === overlay.id && "ring-2 ring-rose-500 bg-black/40 scale-110 z-10"
               )}
-              onMouseDown={(e) => handleDrag(overlay.id, e)}
-              onTouchStart={(e) => handleDrag(overlay.id, e)}
+              onMouseDown={(e) => {
+                setEditingTextId(overlay.id);
+                handleDrag(overlay.id, e);
+              }}
+              onTouchStart={(e) => {
+                setEditingTextId(overlay.id);
+                handleDrag(overlay.id, e);
+              }}
               onDoubleClick={() => setEditingTextId(overlay.id)}
             >
               {editingTextId === overlay.id ? (
@@ -322,50 +335,94 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
           )}
 
           {activeTab === 'text' && (
-            <div className="flex flex-col items-center space-y-4">
-              <button 
-                onClick={addTextOverlay}
-                className="flex items-center space-x-2 bg-zinc-800 hover:bg-zinc-700 px-6 py-3 rounded-2xl transition-colors"
-              >
-                <Type size={18} />
-                <span className="text-xs font-bold">Add Text Overlay</span>
-              </button>
-              
-              {textOverlays.length > 0 && (
-                <div className="flex space-x-2">
+            <div className="flex flex-col space-y-4 h-full overflow-y-auto no-scrollbar pb-4">
+              <div className="flex items-center justify-between">
+                <button 
+                  onClick={addTextOverlay}
+                  className="flex items-center space-x-2 bg-rose-500/20 text-rose-500 hover:bg-rose-500/30 px-4 py-2 rounded-xl transition-colors text-xs font-bold"
+                >
+                  <Type size={16} />
+                  <span>Add Text</span>
+                </button>
+                
+                {editingTextId && (
                   <button 
-                    onClick={() => {
-                      if (editingTextId) removeTextOverlay(editingTextId);
-                      else removeTextOverlay(textOverlays[textOverlays.length - 1].id);
-                    }}
-                    className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors"
-                    title="Delete selected text"
+                    onClick={() => removeTextOverlay(editingTextId)}
+                    className="flex items-center space-x-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-rose-500 px-4 py-2 rounded-xl transition-colors text-xs font-bold"
                   >
                     <Trash2 size={16} />
+                    <span>Delete</span>
                   </button>
-                  <div className="flex flex-col space-y-2">
-                    <div className="flex space-x-1">
-                      {['#ffffff', '#000000', '#f43f5e', '#3b82f6', '#10b981', '#f59e0b'].map(color => (
+                )}
+              </div>
+              
+              {textOverlays.length > 0 && (
+                <div className="space-y-4">
+                  {/* Font Selection */}
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Font</span>
+                    <div className="flex space-x-2 overflow-x-auto no-scrollbar pb-1">
+                      {FONTS.map(font => (
+                        <button
+                          key={font.name}
+                          onClick={() => {
+                            const targetId = editingTextId || textOverlays[textOverlays.length - 1].id;
+                            if (targetId) updateTextOverlay(targetId, { fontFamily: font.family });
+                          }}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg text-[10px] font-bold flex-shrink-0 border transition-all",
+                            (editingTextId ? textOverlays.find(t => t.id === editingTextId)?.fontFamily === font.family : textOverlays[textOverlays.length - 1].fontFamily === font.family)
+                              ? "bg-rose-500 border-rose-500 text-white" 
+                              : "bg-zinc-800 border-white/5 text-zinc-400"
+                          )}
+                          style={{ fontFamily: font.family }}
+                        >
+                          {font.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Color Selection */}
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Color</span>
+                    <div className="flex space-x-2 overflow-x-auto no-scrollbar pb-1">
+                      {COLORS.map(color => (
                         <button
                           key={color}
                           onClick={() => {
                             const targetId = editingTextId || textOverlays[textOverlays.length - 1].id;
                             if (targetId) updateTextOverlay(targetId, { color });
                           }}
-                          className="w-6 h-6 rounded-full border border-white/10"
+                          className={cn(
+                            "w-6 h-6 rounded-full border-2 flex-shrink-0 transition-all",
+                            (editingTextId ? textOverlays.find(t => t.id === editingTextId)?.color === color : textOverlays[textOverlays.length - 1].color === color)
+                              ? "border-white scale-110" 
+                              : "border-transparent"
+                          )}
                           style={{ backgroundColor: color }}
                         />
                       ))}
                     </div>
-                    <div className="flex space-x-1">
-                      {[16, 24, 32, 48, 64].map(size => (
+                  </div>
+
+                  {/* Size Selection */}
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Size</span>
+                    <div className="flex space-x-2 overflow-x-auto no-scrollbar pb-1">
+                      {[12, 16, 20, 24, 32, 40, 48, 64].map(size => (
                         <button
                           key={size}
                           onClick={() => {
                             const targetId = editingTextId || textOverlays[textOverlays.length - 1].id;
                             if (targetId) updateTextOverlay(targetId, { fontSize: size });
                           }}
-                          className="w-8 h-8 rounded bg-zinc-800 text-[10px] font-bold flex items-center justify-center border border-white/10"
+                          className={cn(
+                            "w-10 h-10 rounded-lg bg-zinc-800 text-[10px] font-bold flex items-center justify-center flex-shrink-0 border transition-all",
+                            (editingTextId ? textOverlays.find(t => t.id === editingTextId)?.fontSize === size : textOverlays[textOverlays.length - 1].fontSize === size)
+                              ? "border-rose-500 text-rose-500" 
+                              : "border-white/5 text-zinc-400"
+                          )}
                         >
                           {size}
                         </button>

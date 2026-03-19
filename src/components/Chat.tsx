@@ -1,19 +1,93 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Phone, Video, X, Mic, MicOff, VideoOff, PhoneOff, User as UserIcon, MessageSquare, Loader2 } from 'lucide-react';
+import { Send, Phone, Video, X, Mic, MicOff, VideoOff, PhoneOff, User as UserIcon, MessageSquare, Loader2, Play, Pause, Square, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
 import Peer from 'simple-peer';
 import { User } from '../types';
+import { cn } from '../utils';
 import { collection, query, where, orderBy, onSnapshot, addDoc, Timestamp, limit, getDoc, doc } from 'firebase/firestore';
-import { db } from '../services/firebase';
+import { db, storage } from '../services/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 interface Message {
   id: string;
-  text: string;
+  text?: string;
+  audioUrl?: string;
+  type: 'text' | 'voice';
   senderId: string;
   senderName: string;
   createdAt: any;
 }
+
+const VoiceMessagePlayer: React.FC<{ url: string, senderId: string, currentUserId: string, formatTime: (s: number) => string }> = ({ url, senderId, currentUserId, formatTime }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    audio.onloadedmetadata = () => setDuration(audio.duration);
+    audio.ontimeupdate = () => setCurrentTime(audio.currentTime);
+    audio.onended = () => setIsPlaying(false);
+    return () => {
+      audio.pause();
+      audio.src = '';
+    };
+  }, [url]);
+
+  const togglePlay = () => {
+    if (isPlaying) {
+      audioRef.current?.pause();
+    } else {
+      audioRef.current?.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  return (
+    <div className="flex items-center space-x-3 min-w-[200px]">
+      <button 
+        onClick={togglePlay}
+        className={`p-2 rounded-full transition-all ${
+          senderId === currentUserId ? 'bg-white/20 hover:bg-white/30' : 'bg-rose-500/20 hover:bg-rose-500/30'
+        }`}
+      >
+        {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
+      </button>
+      <div className="flex-1 space-y-1">
+        <div className="h-1.5 bg-white/20 rounded-full overflow-hidden relative">
+          <motion.div 
+            className={`h-full ${senderId === currentUserId ? 'bg-white' : 'bg-rose-500'}`}
+            initial={{ width: 0 }}
+            animate={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
+            transition={{ type: 'spring', bounce: 0, duration: 0.1 }}
+          />
+        </div>
+        <div className="flex justify-between text-[10px] font-medium opacity-70">
+          <span>{formatTime(currentTime)}</span>
+          <span>{duration ? formatTime(duration) : '--:--'}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const WaveformVisualizer: React.FC<{ data: Uint8Array }> = ({ data }) => {
+  return (
+    <div className="flex items-center space-x-0.5 h-8 px-2">
+      {Array.from(data).map((val, i) => (
+        <motion.div
+          key={i}
+          animate={{ height: `${Math.max(4, (val / 255) * 32)}px` }}
+          transition={{ type: 'spring', bounce: 0.5, duration: 0.1 }}
+          className="w-1 bg-rose-500 rounded-full"
+        />
+      ))}
+    </div>
+  );
+};
 
 export const Chat: React.FC<{ currentUser: User, onBack?: () => void, preSelectedUserId?: string }> = ({ currentUser, onBack, preSelectedUserId }) => {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -30,6 +104,19 @@ export const Chat: React.FC<{ currentUser: User, onBack?: () => void, preSelecte
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+
+  // Voice recording state
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [audioData, setAudioData] = useState<Uint8Array>(new Uint8Array(0));
+  const [isHolding, setIsHolding] = useState(false);
+  const mediaRecorderRef_voice = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const holdTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const myVideo = useRef<HTMLVideoElement>(null);
   const userVideo = useRef<HTMLVideoElement>(null);
@@ -104,13 +191,16 @@ export const Chat: React.FC<{ currentUser: User, onBack?: () => void, preSelecte
     return () => unsubscribe();
   }, [selectedUser, currentUser.uid]);
 
-  const sendMessage = async () => {
-    if (!inputText.trim() || !selectedUser) return;
+  const sendMessage = async (audioUrl?: string) => {
+    if (!selectedUser) return;
+    if (!audioUrl && !inputText.trim()) return;
 
     const roomId = [currentUser.uid, selectedUser.uid].sort().join('_');
     const messageData = {
       roomId,
-      text: inputText,
+      text: audioUrl ? '' : inputText,
+      audioUrl: audioUrl || null,
+      type: audioUrl ? 'voice' : 'text',
       senderId: currentUser.uid,
       senderName: currentUser.name,
       createdAt: Timestamp.now()
@@ -118,7 +208,7 @@ export const Chat: React.FC<{ currentUser: User, onBack?: () => void, preSelecte
 
     await addDoc(collection(db, 'messages'), messageData);
     socket?.emit('send-message', { ...messageData, roomId: selectedUser.uid });
-    setInputText('');
+    if (!audioUrl) setInputText('');
   };
 
   // WebRTC Logic
@@ -235,6 +325,124 @@ export const Chat: React.FC<{ currentUser: User, onBack?: () => void, preSelecte
     }
   };
 
+  const startRecordingVoice = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // Set up Audio Context for visualization
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioContextRef.current = audioContext;
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 64;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const updateVisualizer = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(dataArray);
+        setAudioData(new Uint8Array(dataArray));
+        animationFrameRef.current = requestAnimationFrame(updateVisualizer);
+      };
+      updateVisualizer();
+
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef_voice.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        if (audioChunksRef.current.length > 0) {
+          try {
+            const storageRef = ref(storage, `voice_messages/${currentUser.uid}_${Date.now()}.webm`);
+            await uploadBytes(storageRef, audioBlob);
+            const url = await getDownloadURL(storageRef);
+            sendMessage(url);
+          } catch (error) {
+            console.error('Error uploading voice message:', error);
+          }
+        }
+        stream.getTracks().forEach(track => track.stop());
+        if (audioContextRef.current) {
+          audioContextRef.current.close();
+        }
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+        }
+        analyserRef.current = null;
+        setAudioData(new Uint8Array(0));
+      };
+
+      mediaRecorder.start();
+      setIsRecordingVoice(true);
+      setRecordingTime(0);
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error('Error accessing microphone:', err);
+    }
+  };
+
+  const stopRecordingVoice = () => {
+    if (mediaRecorderRef_voice.current && isRecordingVoice) {
+      mediaRecorderRef_voice.current.stop();
+      setIsRecordingVoice(false);
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+    }
+  };
+
+  const cancelRecordingVoice = () => {
+    if (mediaRecorderRef_voice.current && isRecordingVoice) {
+      audioChunksRef.current = [];
+      mediaRecorderRef_voice.current.stop();
+      setIsRecordingVoice(false);
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      analyserRef.current = null;
+      setAudioData(new Uint8Array(0));
+    }
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    holdTimeoutRef.current = setTimeout(() => {
+      startRecordingVoice();
+      setIsHolding(true);
+    }, 200);
+  };
+
+  const handlePointerUp = () => {
+    if (holdTimeoutRef.current) {
+      clearTimeout(holdTimeoutRef.current);
+    }
+    if (isHolding) {
+      stopRecordingVoice();
+      setIsHolding(false);
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   return (
     <div className="flex flex-col h-full bg-black">
       {/* Header */}
@@ -308,29 +516,73 @@ export const Chat: React.FC<{ currentUser: User, onBack?: () => void, preSelecte
                       ? 'bg-rose-500 text-white rounded-tr-none' 
                       : 'bg-zinc-800 text-zinc-100 rounded-tl-none'
                   }`}>
-                    {msg.text}
+                    {msg.type === 'voice' ? (
+                      <VoiceMessagePlayer 
+                        url={msg.audioUrl!} 
+                        senderId={msg.senderId} 
+                        currentUserId={currentUser.uid} 
+                        formatTime={formatTime}
+                      />
+                    ) : (
+                      msg.text
+                    )}
                   </div>
                 </div>
               ))}
             </div>
             
             <div className="p-4 bg-zinc-900/50 border-t border-white/10">
-              <div className="flex items-center space-x-2">
-                <input 
-                  type="text"
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                  placeholder="Type a message..."
-                  className="flex-1 bg-black border border-white/10 rounded-full px-4 py-2 text-sm focus:outline-none focus:border-rose-500 transition-all"
-                />
-                <button 
-                  onClick={sendMessage}
-                  className="p-2 bg-rose-500 rounded-full text-white hover:bg-rose-600 transition-all"
-                >
-                  <Send size={18} />
-                </button>
-              </div>
+              {isRecordingVoice ? (
+                <div className="flex items-center justify-between bg-black border border-rose-500/50 rounded-3xl px-4 py-3">
+                  <div className="flex items-center space-x-3 flex-1">
+                    <div className="w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
+                    <span className="text-sm font-mono text-rose-500 min-w-[40px]">{formatTime(recordingTime)}</span>
+                    <WaveformVisualizer data={audioData} />
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button 
+                      onClick={cancelRecordingVoice}
+                      className="p-2 text-zinc-500 hover:text-rose-500 transition-all bg-white/5 rounded-full"
+                    >
+                      <Trash2 size={20} />
+                    </button>
+                    <button 
+                      onClick={stopRecordingVoice}
+                      className="p-3 bg-rose-500 rounded-full text-white hover:bg-rose-600 transition-all shadow-lg shadow-rose-500/20"
+                    >
+                      <Send size={20} />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-2">
+                  <button 
+                    onPointerDown={handlePointerDown}
+                    onPointerUp={handlePointerUp}
+                    onPointerLeave={handlePointerUp}
+                    className={cn(
+                      "p-2 transition-all rounded-full",
+                      isHolding ? "bg-rose-500 text-white scale-125" : "text-zinc-400 hover:text-rose-500"
+                    )}
+                  >
+                    <Mic size={20} />
+                  </button>
+                  <input 
+                    type="text"
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                    placeholder="Type a message..."
+                    className="flex-1 bg-black border border-white/10 rounded-full px-4 py-2 text-sm focus:outline-none focus:border-rose-500 transition-all"
+                  />
+                  <button 
+                    onClick={() => sendMessage()}
+                    className="p-2 bg-rose-500 rounded-full text-white hover:bg-rose-600 transition-all"
+                  >
+                    <Send size={18} />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}

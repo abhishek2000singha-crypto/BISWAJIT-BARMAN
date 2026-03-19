@@ -56,6 +56,7 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
   const [withdrawalSearchQuery, setWithdrawalSearchQuery] = useState('');
   const [superChatSearchQuery, setSuperChatSearchQuery] = useState('');
   const [taskSearchQuery, setTaskSearchQuery] = useState('');
+  const [taskAssigneeFilter, setTaskAssigneeFilter] = useState('all');
   const [walletSearchQuery, setWalletSearchQuery] = useState('');
   const [expandedWithdrawalId, setExpandedWithdrawalId] = useState<string | null>(null);
   const [showRejectionModal, setShowRejectionModal] = useState<string | null>(null);
@@ -869,6 +870,16 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
               <p className="text-[10px] text-zinc-500 mt-1">Moderation and support queue</p>
             </div>
             <div className="flex items-center space-x-4">
+              <select 
+                value={taskAssigneeFilter}
+                onChange={(e) => setTaskAssigneeFilter(e.target.value)}
+                className="bg-zinc-900 border border-zinc-800 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-rose-500 transition-colors text-zinc-400"
+              >
+                <option value="all">All Assignees</option>
+                {allUsers.filter(u => u.role === 'admin').map(admin => (
+                  <option key={admin.uid} value={admin.uid}>@{admin.name}</option>
+                ))}
+              </select>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
                 <input 
@@ -905,11 +916,13 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
               </div>
             ) : (
               tasks
-                .filter(t => 
-                  t.title.toLowerCase().includes(taskSearchQuery.toLowerCase()) || 
-                  t.description.toLowerCase().includes(taskSearchQuery.toLowerCase()) ||
-                  t.assignedToName?.toLowerCase().includes(taskSearchQuery.toLowerCase())
-                )
+                .filter(t => {
+                  const matchesSearch = t.title.toLowerCase().includes(taskSearchQuery.toLowerCase()) || 
+                                      t.description.toLowerCase().includes(taskSearchQuery.toLowerCase()) ||
+                                      t.assignedToName?.toLowerCase().includes(taskSearchQuery.toLowerCase());
+                  const matchesAssignee = taskAssigneeFilter === 'all' || t.assignedToId === taskAssigneeFilter;
+                  return matchesSearch && matchesAssignee;
+                })
                 .map(task => (
                 <div key={task.id} className="bg-zinc-900 border border-zinc-800 p-6 rounded-[32px] flex flex-col space-y-4">
                   <div className="flex items-start justify-between">
@@ -1486,6 +1499,17 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
                       <div className="bg-emerald-500/20 backdrop-blur-md border border-emerald-500/30 text-emerald-500 px-2 py-1 rounded-lg flex items-center space-x-1.5 shadow-lg">
                         <CheckCircle2 size={10} />
                         <span className="text-[8px] font-black uppercase tracking-widest">Ready</span>
+                      </div>
+                    )}
+
+                    {/* Resolutions */}
+                    {video.resolutions && Object.keys(video.resolutions).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {Object.keys(video.resolutions).map(res => (
+                          <div key={res} className="bg-white/10 backdrop-blur-md border border-white/10 text-white/80 px-1.5 py-0.5 rounded-md text-[7px] font-black uppercase tracking-tighter">
+                            {res}
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -2115,7 +2139,7 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 px-4 text-sm focus:outline-none focus:border-rose-500 transition-colors"
                   >
                     <option value="">Select Admin</option>
-                    {allUsers.filter(u => u.role === 'admin').map(admin => (
+                    {allUsers.filter(u => u.role === 'admin' && u.uid !== currentUser.uid).map(admin => (
                       <option key={admin.uid} value={admin.uid}>@{admin.name}</option>
                     ))}
                   </select>

@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Search, Music, Play, Pause, Check, X, Loader2, Volume2, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AudioTrack } from '../types';
 import { cn } from '../utils';
+import { useAudio } from '../contexts/AudioContext';
 
 const MOCK_AUDIO_TRACKS: AudioTrack[] = [
   {
@@ -190,9 +191,7 @@ export const AudioLibrary: React.FC<AudioLibraryProps> = ({ onSelect, onClose, s
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState('All');
   const [selectedGenre, setSelectedGenre] = useState('All');
-  const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
-  const [audio] = useState(new Audio());
-  const [isLoading, setIsLoading] = useState(false);
+  const { playingTrack, isPlaying, isLoading, togglePlay, stopTrack } = useAudio();
 
   const filteredTracks = MOCK_AUDIO_TRACKS.filter(track => {
     const matchesSearch = 
@@ -206,34 +205,6 @@ export const AudioLibrary: React.FC<AudioLibraryProps> = ({ onSelect, onClose, s
     
     return matchesSearch && matchesLanguage && matchesGenre;
   });
-
-  useEffect(() => {
-    return () => {
-      audio.pause();
-      audio.src = '';
-    };
-  }, [audio]);
-
-  const togglePlay = (track: AudioTrack) => {
-    if (playingTrackId === track.id) {
-      audio.pause();
-      setPlayingTrackId(null);
-    } else {
-      setIsLoading(true);
-      audio.src = track.url;
-      audio.play().then(() => {
-        setIsLoading(false);
-        setPlayingTrackId(track.id);
-      }).catch(err => {
-        console.error("Audio play failed", err);
-        setIsLoading(false);
-      });
-    }
-  };
-
-  audio.onended = () => {
-    setPlayingTrackId(null);
-  };
 
   return (
     <div className="flex flex-col h-full bg-zinc-950">
@@ -326,7 +297,7 @@ export const AudioLibrary: React.FC<AudioLibraryProps> = ({ onSelect, onClose, s
                       onClick={(e) => { e.stopPropagation(); togglePlay(track); }}
                       className="w-10 h-10 bg-white text-black rounded-full flex items-center justify-center shadow-xl"
                     >
-                      {playingTrackId === track.id ? <Pause size={20} /> : <Play size={20} className="ml-1" />}
+                      {playingTrack?.id === track.id && isPlaying ? <Pause size={20} /> : <Play size={20} className="ml-1" />}
                     </button>
                   </div>
                   <div className="absolute bottom-3 left-3 right-3">
@@ -372,13 +343,13 @@ export const AudioLibrary: React.FC<AudioLibraryProps> = ({ onSelect, onClose, s
                         onClick={() => togglePlay(track)}
                         className="absolute inset-0 bg-black/40 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity"
                       >
-                        {playingTrackId === track.id ? (
-                          isLoading ? <Loader2 className="animate-spin" size={16} /> : <Pause size={16} />
+                        {playingTrack?.id === track.id ? (
+                          isLoading ? <Loader2 className="animate-spin" size={16} /> : (isPlaying ? <Pause size={16} /> : <Play size={16} />)
                         ) : (
                           <Play size={16} />
                         )}
                       </button>
-                      {playingTrackId === track.id && !isLoading && (
+                      {playingTrack?.id === track.id && isPlaying && !isLoading && (
                         <div className="absolute inset-0 bg-black/40 flex items-center justify-center pointer-events-none">
                           <div className="flex items-end space-x-0.5 h-4">
                             <motion.div animate={{ height: [4, 12, 4] }} transition={{ repeat: Infinity, duration: 0.5 }} className="w-0.5 bg-rose-500" />
@@ -428,16 +399,16 @@ export const AudioLibrary: React.FC<AudioLibraryProps> = ({ onSelect, onClose, s
         </section>
       </div>
 
-      {playingTrackId && (
+      {playingTrack && (
         <div className="p-4 bg-zinc-900/80 backdrop-blur-xl border-t border-white/5 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <Volume2 size={16} className="text-rose-500 animate-pulse" />
+            <Volume2 size={16} className={cn("text-rose-500", isPlaying && "animate-pulse")} />
             <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-              Previewing: <span className="text-white">{MOCK_AUDIO_TRACKS.find(t => t.id === playingTrackId)?.title}</span>
+              {isPlaying ? 'Playing:' : 'Paused:'} <span className="text-white">{playingTrack.title}</span>
             </p>
           </div>
           <button 
-            onClick={() => { audio.pause(); setPlayingTrackId(null); }}
+            onClick={stopTrack}
             className="text-[10px] font-black text-rose-500 uppercase tracking-widest"
           >
             Stop

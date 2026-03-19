@@ -12,6 +12,7 @@ import App from './App.tsx';
 import './index.css';
 import { UploadProvider } from './contexts/UploadContext';
 import { ErrorProvider } from './contexts/ErrorContext';
+import { AudioProvider } from './contexts/AudioContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 const container = document.getElementById('root');
@@ -23,7 +24,9 @@ root.render(
     <ErrorBoundary>
       <ErrorProvider>
         <UploadProvider>
-          <App />
+          <AudioProvider>
+            <App />
+          </AudioProvider>
         </UploadProvider>
       </ErrorProvider>
     </ErrorBoundary>

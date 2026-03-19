@@ -12,6 +12,7 @@ import { Auth } from './components/Auth';
 import { Chat } from './components/Chat';
 import { Discover } from './components/Discover';
 import { Notifications } from './components/Notifications';
+import { GlobalAudioPlayer } from './components/GlobalAudioPlayer';
 import { useUpload } from './contexts/UploadContext';
 import { cn } from './utils';
 
@@ -429,6 +430,9 @@ export default function App() {
           ))}
         </AnimatePresence>
       </div>
+
+      {/* Global Audio Player */}
+      <GlobalAudioPlayer />
 
       {/* Bottom Navigation */}
       <nav className="h-16 bg-black border-t border-white/10 flex items-center justify-around px-2 z-50">
