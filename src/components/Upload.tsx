@@ -3,12 +3,14 @@ import { Upload as UploadIcon, X, Sparkles, AlertTriangle, CheckCircle2, Loader2
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
 import { analyzeVideoContent } from '../services/geminiService';
+import { rewardForAction } from '../services/monetizationService';
 import { User, AudioTrack, TextOverlay } from '../types';
 import { useUpload } from '../contexts/UploadContext';
 import { useError } from '../contexts/ErrorContext';
 import { cn, formatDuration } from '../utils';
 import { AudioLibrary } from './AudioLibrary';
 import { VideoEditor } from './VideoEditor';
+import { useAudio } from '../contexts/AudioContext';
 import { compressVideo } from '../utils/videoCompression';
 import confetti from 'canvas-confetti';
 
@@ -73,6 +75,7 @@ const extractFrames = (file: File, count: number = 3): Promise<string[]> => {
 export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user, onComplete }) => {
   const { showError, showSuccess } = useError();
   const { startUpload, finalizeUpload, updateThumbnail, uploads, removeUpload } = useUpload();
+  const { stopTrack } = useAudio();
   const [file, setFile] = useState<File | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const recordingVideoRef = useRef<HTMLVideoElement>(null);
@@ -92,6 +95,9 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
   const [selectedAudio, setSelectedAudio] = useState<AudioTrack | null>(null);
   const [thumbnailBlob, setThumbnailBlob] = useState<Blob | null>(null);
   const [thumbnailPreviewUrl, setThumbnailPreviewUrl] = useState<string | null>(null);
+  const [suggestedThumbnails, setSuggestedThumbnails] = useState<string[]>([]);
+  const [isExtractingFrames, setIsExtractingFrames] = useState(false);
+  const thumbnailInputRef = useRef<HTMLInputElement>(null);
   const [showAudioLibrary, setShowAudioLibrary] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -186,6 +192,16 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
         URL.revokeObjectURL(video.src);
       };
       video.src = URL.createObjectURL(droppedFile);
+
+      // Extract suggested frames
+      setIsExtractingFrames(true);
+      extractFrames(droppedFile, 6).then(frames => {
+        setSuggestedThumbnails(frames);
+        setIsExtractingFrames(false);
+      }).catch(err => {
+        console.error("Frame extraction failed", err);
+        setIsExtractingFrames(false);
+      });
     } else {
       setDuration(0);
     }
@@ -501,6 +517,8 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
     setIsAnalyzing(false);
     setRecordingTime(0);
     setIsRecording(false);
+    setSuggestedThumbnails([]);
+    setIsExtractingFrames(false);
   };
 
   const executePublish = async () => {
@@ -529,6 +547,10 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
           seoTitle: analysis.seoTitle
         } : undefined
       });
+
+      // Reward for posting
+      rewardForAction(user.uid, fileType === 'video' ? 'post_video' : 'post_photo');
+
       showSuccess("Reel published successfully!");
       resetForm();
     } catch (error: any) {
@@ -568,6 +590,11 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
       // Update in cloud
       await updateThumbnail(currentUploadId, blob, user.uid);
       showSuccess("Thumbnail updated!");
+      
+      // Also add to suggested if it's not already there to keep it handy
+      if (!suggestedThumbnails.includes(dataUrl)) {
+        setSuggestedThumbnails(prev => [dataUrl, ...prev.slice(0, 5)]);
+      }
     } catch (error) {
       console.error("Failed to update thumbnail", error);
       showError("Failed to update thumbnail. Please try again.");
@@ -576,13 +603,67 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
     }
   };
 
+  const handleCustomThumbnail = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUploadId) return;
+
+    if (!file.type.startsWith('image/')) {
+      showError("Please upload an image file for the thumbnail.");
+      return;
+    }
+
+    setIsUpdatingThumb(true);
+    try {
+      // Create preview
+      const reader = new FileReader();
+      const dataUrl = await new Promise<string>((resolve) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+      setThumbnailPreviewUrl(dataUrl);
+      
+      // Update in cloud
+      setThumbnailBlob(file);
+      await updateThumbnail(currentUploadId, file, user.uid);
+      showSuccess("Custom thumbnail uploaded!");
+
+      // Add to suggested
+      setSuggestedThumbnails(prev => [dataUrl, ...prev.slice(0, 5)]);
+    } catch (error) {
+      console.error("Failed to upload custom thumbnail", error);
+      showError("Failed to upload custom thumbnail.");
+    } finally {
+      setIsUpdatingThumb(false);
+    }
+  };
+
+  const selectSuggestedThumbnail = async (dataUrl: string) => {
+    if (!currentUploadId) return;
+    
+    setIsUpdatingThumb(true);
+    try {
+      setThumbnailPreviewUrl(dataUrl);
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      setThumbnailBlob(blob);
+      
+      await updateThumbnail(currentUploadId, blob, user.uid);
+      showSuccess("Thumbnail updated!");
+    } catch (error) {
+      console.error("Failed to select suggested thumbnail", error);
+      showError("Failed to update thumbnail.");
+    } finally {
+      setIsUpdatingThumb(false);
+    }
+  };
+
   const getStageMessage = (stage: string) => {
     const isVideo = file?.type.startsWith('video/');
     switch (stage) {
-      case 'preparing': return isVideo ? 'Preparing video...' : 'Preparing photo...';
-      case 'transmitting': return 'Transmitting data...';
-      case 'processing': return 'Processing on server...';
-      case 'transcoding': return isVideo ? 'Optimizing for all devices...' : 'Finalizing...';
+      case 'preparing': return isVideo ? 'Preparing video assets...' : 'Preparing photo...';
+      case 'transmitting': return 'Uploading to secure cloud storage...';
+      case 'processing': return 'Processing and analyzing content...';
+      case 'transcoding': return isVideo ? 'Optimizing video for all devices...' : 'Finalizing...';
       case 'saving': return 'Saving to your profile...';
       case 'done': return 'Successfully published!';
       default: return 'Uploading...';
@@ -605,54 +686,91 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
   if (currentUpload && (isPublishing || currentUpload.status === 'completed' || currentUpload.status === 'error')) {
     return (
       <div className="h-full w-full bg-zinc-950 p-8 flex flex-col items-center justify-center text-center">
-        <div className="w-24 h-24 bg-rose-500/20 rounded-[32px] flex items-center justify-center mb-8 relative">
+        <div className="w-32 h-32 bg-rose-500/10 rounded-[40px] flex items-center justify-center mb-10 relative">
           <motion.div 
             animate={{ rotate: 360 }}
-            transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
-            className="absolute inset-0 border-2 border-dashed border-rose-500/30 rounded-[32px]"
+            transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+            className="absolute -inset-4 border-2 border-dashed border-rose-500/20 rounded-[48px]"
+          />
+          <motion.div 
+            animate={{ scale: [1, 1.1, 1] }}
+            transition={{ duration: 2, repeat: Infinity }}
+            className="absolute inset-0 border-4 border-rose-500/10 rounded-[40px]"
           />
           {currentUpload.status === 'uploading' ? (
-            <UploadIcon size={40} className="text-rose-500 animate-bounce" />
+            <div className="relative">
+              <UploadIcon size={48} className="text-rose-500 animate-bounce" />
+              <motion.div 
+                animate={{ opacity: [0, 1, 0] }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+                className="absolute -top-2 -right-2 w-3 h-3 bg-rose-500 rounded-full shadow-[0_0_10px_rgba(244,63,94,0.8)]"
+              />
+            </div>
           ) : currentUpload.status === 'completed' ? (
-            <CheckCircle2 size={40} className="text-emerald-500" />
+            <CheckCircle2 size={48} className="text-emerald-500" />
           ) : (
-            <AlertTriangle size={40} className="text-rose-500" />
+            <AlertTriangle size={48} className="text-rose-500" />
           )}
         </div>
 
-        <h3 className="text-2xl font-black mb-2">
-          {currentUpload.status === 'uploading' ? getStageMessage(currentUpload.stage) : 
-           currentUpload.status === 'completed' ? 'Upload Complete!' : 'Upload Failed'}
-        </h3>
-        <p className="text-zinc-500 text-sm mb-12 max-w-[240px]">
-          {currentUpload.status === 'uploading' ? `Your ${currentUpload.type === 'video' ? 'video' : 'photo'} is being processed and secured on our global servers.` :
-           currentUpload.status === 'completed' ? `Your ${currentUpload.type === 'video' ? 'reel' : 'post'} is now live and visible to everyone!` : 
-           getErrorMessage(currentUpload.error || 'Something went wrong during the upload.')}
-        </p>
+        <div className="space-y-3 mb-12">
+          <h3 className="text-3xl font-black tracking-tighter uppercase italic">
+            {currentUpload.status === 'uploading' ? 'Publishing Reel' : 
+             currentUpload.status === 'completed' ? 'Reel Live!' : 'Upload Failed'}
+          </h3>
+          <p className="text-zinc-500 text-sm max-w-[280px] mx-auto font-medium leading-relaxed">
+            {currentUpload.status === 'uploading' ? `We're ${getStageMessage(currentUpload.stage).toLowerCase()} Please don't close the app.` :
+             currentUpload.status === 'completed' ? `Your masterpiece is now live and visible to your followers!` : 
+             getErrorMessage(currentUpload.error || 'Something went wrong during the upload.')}
+          </p>
+        </div>
 
-        <div className="w-full max-w-xs bg-zinc-900/50 border border-white/5 rounded-3xl p-6 space-y-4 mb-8">
-          <div className="flex justify-between items-center">
-            <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Upload Progress</span>
-            <span className="text-sm font-black text-white tabular-nums">{Math.round(currentUpload.progress)}%</span>
+        <div className="w-full max-w-sm bg-zinc-900/40 border border-white/5 rounded-[40px] p-8 space-y-6 mb-10 shadow-2xl backdrop-blur-xl">
+          <div className="flex justify-between items-end">
+            <div className="text-left">
+              <span className="block text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-1">Current Stage</span>
+              <span className="text-sm font-black text-white uppercase tracking-wider">{getStageMessage(currentUpload.stage)}</span>
+            </div>
+            <div className="text-right">
+              <span className="block text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-1">Progress</span>
+              <span className="text-2xl font-black text-rose-500 tabular-nums">{Math.round(currentUpload.progress)}%</span>
+            </div>
           </div>
-          <div className="h-2 bg-zinc-950 rounded-full overflow-hidden p-0.5 border border-white/5">
+
+          <div className="relative h-4 bg-zinc-950 rounded-full overflow-hidden p-1 border border-white/5 shadow-inner">
             <motion.div 
-              className="h-full bg-gradient-to-r from-rose-600 to-rose-400 rounded-full"
+              className="h-full bg-gradient-to-r from-rose-600 via-rose-500 to-rose-400 rounded-full relative"
               initial={{ width: 0 }}
               animate={{ width: `${currentUpload.progress}%` }}
               transition={{ type: "spring", bounce: 0, duration: 0.5 }}
-            />
+            >
+              <div className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.2)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.2)_50%,rgba(255,255,255,0.2)_75%,transparent_75%,transparent)] bg-[length:20px_20px] animate-[shimmer_2s_linear_infinite]" />
+            </motion.div>
           </div>
-          <div className="flex items-center space-x-2">
-            <div className={cn(
-              "w-1.5 h-1.5 rounded-full animate-pulse",
-              currentUpload.status === 'uploading' ? "bg-rose-500" :
-              currentUpload.status === 'completed' ? "bg-emerald-500" : "bg-rose-500"
-            )} />
-            <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">
-              {currentUpload.status === 'uploading' ? getStageMessage(currentUpload.stage) : 
-               currentUpload.status === 'completed' ? 'Successfully published' : 'Error occurred'}
-            </p>
+
+          <div className="grid grid-cols-4 gap-2 pt-2">
+            {['preparing', 'transmitting', 'processing', 'transcoding'].map((s, i) => {
+              const stages = ['preparing', 'transmitting', 'processing', 'transcoding', 'saving', 'done'];
+              const currentIndex = stages.indexOf(currentUpload.stage);
+              const stageIndex = stages.indexOf(s);
+              const isActive = stageIndex === currentIndex;
+              const isCompleted = stageIndex < currentIndex;
+
+              return (
+                <div key={s} className="flex flex-col items-center space-y-2">
+                  <div className={cn(
+                    "w-full h-1 rounded-full transition-all duration-500",
+                    isCompleted ? "bg-emerald-500" : isActive ? "bg-rose-500 animate-pulse" : "bg-zinc-800"
+                  )} />
+                  <span className={cn(
+                    "text-[7px] font-black uppercase tracking-tighter",
+                    isCompleted ? "text-emerald-500" : isActive ? "text-rose-500" : "text-zinc-600"
+                  )}>
+                    {s === 'transmitting' ? 'Upload' : s}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -1048,50 +1166,88 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
 
               {/* Thumbnail Selector Bar - Only for Video */}
               {file?.type.startsWith('video/') && (
-                <div className="bg-zinc-900/90 backdrop-blur-xl p-6 border-t border-white/10 space-y-4">
+                <div className="bg-zinc-900/90 backdrop-blur-xl p-6 border-t border-white/10 space-y-6">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="w-12 h-12 rounded-xl overflow-hidden border border-white/10 bg-black shrink-0">
+                    <div>
+                      <h4 className="text-[10px] font-black text-white uppercase tracking-widest mb-1">Video Thumbnail</h4>
+                      <p className="text-[8px] text-zinc-500 font-bold uppercase tracking-widest">Select a frame or upload a custom cover</p>
+                    </div>
+                    
+                    <div className="flex items-center space-x-2">
+                       <input 
+                        type="file" 
+                        ref={thumbnailInputRef} 
+                        onChange={handleCustomThumbnail} 
+                        accept="image/*" 
+                        className="hidden" 
+                      />
+                      <button 
+                        onClick={() => thumbnailInputRef.current?.click()}
+                        className="flex items-center space-x-2 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg transition-all text-[8px] font-black uppercase tracking-widest border border-white/5"
+                      >
+                        <UploadIcon size={12} />
+                        <span>Upload Custom</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Suggested Frames */}
+                  <div className="space-y-3">
+                    <div className="flex items-center space-x-2 overflow-x-auto pb-2 custom-scrollbar no-scrollbar">
+                      {isExtractingFrames ? (
+                        Array(6).fill(0).map((_, i) => (
+                          <div key={i} className="w-16 aspect-[9/16] bg-zinc-800 rounded-lg animate-pulse shrink-0" />
+                        ))
+                      ) : (
+                        suggestedThumbnails.map((frame, i) => (
+                          <button
+                            key={i}
+                            onClick={() => selectSuggestedThumbnail(frame)}
+                            className={cn(
+                              "w-16 aspect-[9/16] rounded-lg overflow-hidden border-2 transition-all shrink-0 hover:scale-105 active:scale-95",
+                              thumbnailPreviewUrl === frame ? "border-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.3)]" : "border-transparent opacity-60 hover:opacity-100"
+                            )}
+                          >
+                            <img src={frame} className="w-full h-full object-cover" alt={`Frame ${i}`} />
+                          </button>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="flex items-center space-x-3 bg-black/40 p-4 rounded-2xl border border-white/5">
+                      <div className="w-10 h-10 rounded-lg overflow-hidden border border-white/10 shrink-0 bg-zinc-800">
                         {thumbnailPreviewUrl ? (
-                          <img src={thumbnailPreviewUrl} className="w-full h-full object-cover" alt="Thumbnail Preview" />
+                          <img src={thumbnailPreviewUrl} className="w-full h-full object-cover" alt="Selected" />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center text-zinc-700">
-                            <Camera size={16} />
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Camera size={16} className="text-zinc-600" />
                           </div>
                         )}
                       </div>
-                      <div className="flex flex-col">
-                        <span className="text-[10px] font-black text-white uppercase tracking-widest">Thumbnail Frame</span>
-                        <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-widest">Scrub to select cover</span>
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[8px] font-black text-rose-500 uppercase tracking-widest">Scrub to capture custom frame</span>
+                          {Math.round(currentTime) > 0 && (
+                            <button 
+                              onClick={captureThumbnail}
+                              disabled={isUpdatingThumb}
+                              className="text-[8px] font-black text-white hover:text-rose-500 uppercase tracking-widest transition-colors flex items-center space-x-1"
+                            >
+                              {isUpdatingThumb ? <Loader2 size={10} className="animate-spin" /> : <Camera size={10} />}
+                              <span>Capture @ {formatDuration(currentTime)}</span>
+                            </button>
+                          )}
+                        </div>
+                        <input 
+                          type="range"
+                          min="0"
+                          max={duration || 0}
+                          step="0.1"
+                          value={currentTime}
+                          onChange={handleSeek}
+                          className="w-full h-1 bg-zinc-800 appearance-none cursor-pointer accent-rose-500 rounded-full"
+                        />
                       </div>
-                    </div>
-                    <button 
-                      onClick={captureThumbnail}
-                      disabled={isUpdatingThumb}
-                      className={cn(
-                        "flex items-center space-x-2 px-4 py-2 rounded-xl transition-all shadow-lg active:scale-95",
-                        isUpdatingThumb ? "bg-zinc-800 text-zinc-500" : "bg-white hover:bg-zinc-200 text-black"
-                      )}
-                    >
-                      {isUpdatingThumb ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
-                      <span className="text-[10px] font-black uppercase tracking-widest">Set Cover</span>
-                    </button>
-                  </div>
-                  <div className="relative h-12 flex items-center px-2 bg-black/40 rounded-2xl border border-white/5">
-                    <div className="absolute inset-x-4 h-1 bg-zinc-800 rounded-full" />
-                    <input 
-                      type="range"
-                      min="0"
-                      max={duration || 0}
-                      step="0.1"
-                      value={currentTime}
-                      onChange={handleSeek}
-                      className="relative w-full h-8 bg-transparent appearance-none cursor-pointer accent-rose-500 z-10"
-                    />
-                    <div className="absolute -bottom-1 left-4 right-4 flex justify-between text-[7px] font-black text-zinc-600 uppercase tracking-widest">
-                      <span>00:00</span>
-                      <span className="text-rose-500/50">{formatDuration(currentTime)}</span>
-                      <span>{formatDuration(duration)}</span>
                     </div>
                   </div>
                 </div>
@@ -1109,8 +1265,16 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
                 <motion.div 
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-zinc-900/50 border border-white/5 rounded-[32px] p-6 shadow-xl"
+                  className="bg-zinc-900/80 backdrop-blur-xl border border-white/10 rounded-[32px] p-6 shadow-2xl relative overflow-hidden"
                 >
+                  <div className="absolute top-0 left-0 h-1 bg-zinc-800 w-full">
+                    <motion.div 
+                      className="h-full bg-rose-500"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${currentUpload.progress}%` }}
+                    />
+                  </div>
+                  
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center space-x-3">
                       <div className={cn(
@@ -1124,21 +1288,21 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
                          <AlertTriangle size={20} />}
                       </div>
                       <div>
-                        <span className="block font-black text-sm uppercase tracking-widest">
-                          {currentUpload.status === 'uploading' ? 'Uploading in Background' : 
-                           currentUpload.status === 'completed' ? 'Upload Ready' : 'Upload Error'}
+                        <span className="block font-black text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-0.5">
+                          {currentUpload.status === 'uploading' ? 'Publishing' : 
+                           currentUpload.status === 'completed' ? 'Ready' : 'Error'}
                         </span>
-                        <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">
+                        <span className="block font-black text-sm text-white uppercase tracking-wider">
                           {getStageMessage(currentUpload.stage)}
                         </span>
                       </div>
                     </div>
                     <div className="text-right">
-                      <span className="block text-sm font-black text-white tabular-nums">{Math.round(currentUpload.progress)}%</span>
-                      <span className="text-[8px] text-zinc-600 font-black uppercase tracking-widest">{currentUpload.status}</span>
+                      <span className="block text-xl font-black text-rose-500 tabular-nums">{Math.round(currentUpload.progress)}%</span>
                     </div>
                   </div>
-                  <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                  
+                  <div className="h-2 bg-zinc-950 rounded-full overflow-hidden p-0.5 border border-white/5">
                     <motion.div 
                       className={cn(
                         "h-full rounded-full",
@@ -1500,6 +1664,7 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
                 onSelect={(track) => {
                   setSelectedAudio(track);
                   setShowAudioLibrary(false);
+                  stopTrack();
                 }}
                 onClose={() => setShowAudioLibrary(false)}
                 selectedTrackId={selectedAudio?.id}

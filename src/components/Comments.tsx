@@ -8,6 +8,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { sendNotification } from '../services/notificationService';
 import { useError } from '../contexts/ErrorContext';
 import { trackInteraction } from '../services/interactionService';
+import { rewardForAction } from '../services/monetizationService';
 
 interface CommentsProps {
   videoId: string;
@@ -73,6 +74,9 @@ export const Comments: React.FC<CommentsProps> = ({ videoId, onClose, onUserClic
         if (videoSnap.exists()) {
           const videoData = videoSnap.data() as Video;
           trackInteraction(auth.currentUser.uid, videoId, videoData.userId, 'comment');
+          
+          // Reward creator for comment
+          rewardForAction(videoData.userId, 'comment', 1);
         }
       }
       

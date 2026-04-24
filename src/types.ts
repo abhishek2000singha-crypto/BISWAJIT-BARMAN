@@ -7,8 +7,20 @@ export interface User {
   followingCount: number;
   totalLikes: number;
   totalViews: number;
-  role: 'user' | 'admin';
+  role: 'user' | 'admin' | 'banned';
   monetizationStatus: 'none' | 'pending' | 'approved' | 'rejected';
+  monetizationDate?: number;
+  videosCount: number;
+  referralCode?: string;
+  referredBy?: string;
+  totalWatchTime: number; // in seconds
+  earnings: {
+    likes: number;
+    comments: number;
+    watchTime: number;
+    referrals: number;
+    posts: number;
+  };
   policyViolations: number;
   walletBalance: number;
   superChatBalance: number;
@@ -31,6 +43,7 @@ export interface User {
   };
   lastActive?: number;
   createdAt: number;
+  isProfileSetupComplete?: boolean;
 }
 
 export interface SuperChat {

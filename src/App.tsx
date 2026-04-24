@@ -13,6 +13,7 @@ import { Chat } from './components/Chat';
 import { Discover } from './components/Discover';
 import { Notifications } from './components/Notifications';
 import { GlobalAudioPlayer } from './components/GlobalAudioPlayer';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { useUpload } from './contexts/UploadContext';
 import { cn } from './utils';
 
@@ -202,6 +203,10 @@ export default function App() {
   const renderContent = () => {
     if (!user && activeTab !== 'home') return <Auth onLogin={setUser} onCancel={() => setActiveTab('home')} />;
     
+    if (user && !user.isProfileSetupComplete && activeTab !== 'home' && activeTab !== 'admin') {
+      return <Auth onLogin={setUser} onCancel={() => setActiveTab('home')} initialStep="setup" initialUser={user} />;
+    }
+
     if (user?.role === 'banned') {
       return (
         <div className="h-full w-full flex flex-col items-center justify-center p-8 text-center bg-zinc-950">
@@ -252,6 +257,7 @@ export default function App() {
         <Profile 
           user={user} 
           onLogout={handleLogout} 
+          onUserUpdate={setUser}
           viewingUserId={viewingProfileId || undefined} 
           onBack={() => {
             setViewingProfileId(null);
@@ -289,11 +295,12 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-black text-white max-w-md mx-auto relative overflow-hidden shadow-2xl border-x border-white/10">
-      {/* Main Content Area */}
-      <main className="flex-1 overflow-hidden relative">
-        {renderContent()}
-      </main>
+    <ErrorBoundary>
+      <div className="flex flex-col h-screen bg-black text-white max-w-md mx-auto relative overflow-hidden shadow-2xl border-x border-white/10">
+        {/* Main Content Area */}
+        <main className="flex-1 overflow-hidden relative">
+          {renderContent()}
+        </main>
 
       {/* Global Drag Overlay */}
       <AnimatePresence>
@@ -488,6 +495,7 @@ export default function App() {
         />
       </nav>
     </div>
+    </ErrorBoundary>
   );
 }
 

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { User, Grid, Heart, Settings, Wallet, Rocket, CheckCircle2, IndianRupee, Eye, MessageCircle, Share2, LayoutDashboard, Camera, Edit3, Loader2, LogOut, ChevronLeft, Sparkles, Gift, Clock, AlertCircle, X, Landmark, Lock, Upload as UploadIcon } from 'lucide-react';
+import { User, Grid, Heart, Settings, Wallet, Rocket, CheckCircle2, IndianRupee, Eye, MessageCircle, Share2, LayoutDashboard, Camera, Edit3, Loader2, LogOut, ChevronLeft, Sparkles, Gift, Clock, AlertCircle, X, Landmark, Lock, Upload as UploadIcon, Link as LinkIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BOOST_PLANS, BoostPlan, User as UserType, BoostTransaction, Video as VideoType, Transaction as WalletTransaction, WithdrawalRequest } from '../types';
+import { rewardForAction } from '../services/monetizationService';
 import { Logo } from './Logo';
 import { VideoCard } from './VideoCard';
 import { MonetizationDashboard } from './MonetizationDashboard';
@@ -9,7 +10,9 @@ import { SuperChatModal } from './SuperChatModal';
 import { BoostModal } from './BoostModal';
 import confetti from 'canvas-confetti';
 import { doc, updateDoc, collection, addDoc, query, where, orderBy, onSnapshot, getDoc, writeBatch, increment, getDocs } from 'firebase/firestore';
-import { db, isDemoMode } from '../services/firebase';
+import { db, storage, isDemoMode } from '../services/firebase';
+import { handleFirestoreError, OperationType } from '../services/firestoreErrorHandler';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { format } from 'date-fns';
 import { formatNumber, cn } from '../utils';
 import { useError } from '../contexts/ErrorContext';
@@ -18,12 +21,13 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 export const Profile: React.FC<{ 
   user: UserType, 
   onLogout: () => void, 
+  onUserUpdate?: (user: UserType) => void,
   viewingUserId?: string, 
   onBack?: () => void,
   onNavigate?: (uid: string) => void,
   onMessageClick?: (uid: string) => void,
   onUploadClick?: () => void
-}> = ({ user: currentUser, onLogout, viewingUserId, onBack, onNavigate, onMessageClick, onUploadClick }) => {
+}> = ({ user: currentUser, onLogout, onUserUpdate, viewingUserId, onBack, onNavigate, onMessageClick, onUploadClick }) => {
   const { showError, showSuccess } = useError();
   const isOwnProfile = !viewingUserId || viewingUserId === currentUser.uid;
   const [user, setUser] = useState<UserType | null>(isOwnProfile ? currentUser : null);
@@ -57,7 +61,7 @@ export const Profile: React.FC<{
   const [videoToBoost, setVideoToBoost] = useState<VideoType | null>(null);
   
   const totalComments = userVideos.reduce((acc, vid) => acc + (vid.commentsCount || 0), 0);
-  const estimatedEarnings = ((user?.totalLikes || 0) / 100 * 20) + (totalComments / 100 * 25);
+  const estimatedEarnings = user?.walletBalance || 0;
   
   const [editName, setEditName] = useState(currentUser.name);
   const [editImage, setEditImage] = useState(currentUser.profileImage);
@@ -78,6 +82,7 @@ export const Profile: React.FC<{
   const [editYoutube, setEditYoutube] = useState(currentUser.socialLinks?.youtube || '');
   const [showSuperChat, setShowSuperChat] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   const chartData = [
     { name: 'Mon', views: Math.floor((user?.totalViews || 0) * 0.08) },
@@ -116,12 +121,11 @@ export const Profile: React.FC<{
     }
   }, [viewingUserId, currentUser.uid, isOwnProfile]);
 
-  // Only update edit fields when the user UID changes (to avoid resetting while typing)
-  const lastUid = React.useRef<string | null>(null);
+  // Re-initialize edit fields when modal opens
   useEffect(() => {
-    if (user && user.uid !== lastUid.current) {
-      setEditName(user.name);
-      setEditImage(user.profileImage);
+    if (showEditModal && user) {
+      setEditName(user.name || '');
+      setEditImage(user.profileImage || '');
       setEditBankAcc(user.bankAccountNumber || '');
       setEditIFSC(user.ifscCode || '');
       setEditHolderName(user.accountHolderName || '');
@@ -137,9 +141,8 @@ export const Profile: React.FC<{
       setEditInstagram(user.socialLinks?.instagram || '');
       setEditTwitter(user.socialLinks?.twitter || '');
       setEditYoutube(user.socialLinks?.youtube || '');
-      lastUid.current = user.uid;
     }
-  }, [user]);
+  }, [showEditModal, user]);
 
   useEffect(() => {
     if (!user) return;
@@ -455,6 +458,9 @@ export const Profile: React.FC<{
         });
 
         setIsFollowing(true);
+        
+        // Reward the creator for gaining a follower
+        rewardForAction(viewingUserId, 'follow');
       }
 
       await batch.commit();
@@ -462,6 +468,41 @@ export const Profile: React.FC<{
       console.error("Error following user:", error);
     } finally {
       setIsFollowLoading(false);
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    if (!file.type.startsWith('image/')) {
+      showError("Please select an image file");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      showError("Image size should be less than 5MB");
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      if (isDemoMode) {
+        const localUrl = URL.createObjectURL(file);
+        setEditImage(localUrl);
+        showSuccess("Image selected (Demo Mode)");
+      } else {
+        const storageRef = ref(storage, `profiles/${user.uid}_${Date.now()}`);
+        await uploadBytes(storageRef, file);
+        const url = await getDownloadURL(storageRef);
+        setEditImage(url);
+        showSuccess("Profile picture uploaded!");
+      }
+    } catch (err) {
+      console.error("Upload Error:", err);
+      showError("Failed to upload image. Please try again.");
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -488,11 +529,16 @@ export const Profile: React.FC<{
   };
 
   const handleUpdateProfile = async () => {
-    if (!user || !editName.trim()) return;
+    if (!user || !editName.trim()) {
+      showError("Name is required");
+      return;
+    }
     setIsSaving(true);
     try {
-      const updatedData = {
-        name: editName,
+      const updatedData: any = {
+        uid: user.uid, // Required by security rules sometimes
+        mobile: user.mobile || '', // Required by security rules
+        name: editName.trim(),
         profileImage: editImage,
         bankAccountNumber: editBankAcc,
         ifscCode: editIFSC,
@@ -504,14 +550,22 @@ export const Profile: React.FC<{
         paypalEmail: editPaypal,
         country: editCountry,
         isPrivate: editIsPrivate,
-        bio: editBio,
-        website: editWebsite,
+        bio: editBio.trim(),
+        website: editWebsite.trim(),
+        updatedAt: Date.now(),
         socialLinks: {
-          instagram: editInstagram,
-          twitter: editTwitter,
-          youtube: editYoutube
+          instagram: editInstagram.trim(),
+          twitter: editTwitter.trim(),
+          youtube: editYoutube.trim()
         }
       };
+
+      // Ensure we don't send undefined to Firestore
+      Object.keys(updatedData).forEach(key => {
+        if (updatedData[key] === undefined) {
+          delete updatedData[key];
+        }
+      });
 
       // Save to Firestore if not in demo mode
       if (!isDemoMode) {
@@ -527,11 +581,19 @@ export const Profile: React.FC<{
           ]);
         } catch (err) {
           console.warn("Firestore update failed or timed out, relying on localStorage:", err);
+          try {
+            handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+          } catch (e) {
+            // Error logged and thrown, but we continue for local state resilience
+          }
         }
       }
 
-      // Always update localStorage for resilience
+      // Always update local/global state and localStorage for resilience
       const finalUser = { ...user, ...updatedData };
+      setUser(finalUser);
+      if (onUserUpdate) onUserUpdate(finalUser);
+      
       localStorage.setItem(`demo_user_${user.uid}`, JSON.stringify(finalUser));
       localStorage.setItem(`demo_user_phone_${user.mobile?.replace('+91', '')}`, JSON.stringify(finalUser));
       
@@ -752,13 +814,45 @@ export const Profile: React.FC<{
             />
             <div className="w-px h-10 bg-white/5 self-center" />
             <Stat 
-              label="Following" 
-              value={formatNumber(user.followingCount)} 
-              onClick={() => canSeeContent && setShowFollowingModal(true)}
+              label="Videos" 
+              value={formatNumber(userVideos.length)} 
             />
             <div className="w-px h-10 bg-white/5 self-center" />
             <Stat label="Likes" value={formatNumber(user.totalLikes)} />
           </div>
+
+          {isOwnProfile && (
+            <div className="w-full max-w-sm mt-6 grid grid-cols-2 gap-3">
+              <motion.button 
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setShowMonetizationModal(true)}
+                className={cn(
+                  "flex items-center justify-center space-x-2 p-4 rounded-2xl border transition-all",
+                  user.monetizationStatus === 'approved' 
+                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" 
+                    : user.monetizationStatus === 'pending'
+                    ? "bg-amber-500/10 border-amber-500/20 text-amber-500"
+                    : "bg-rose-500/10 border-rose-500/20 text-rose-500"
+                )}
+              >
+                <IndianRupee size={18} />
+                <span className="text-xs font-black uppercase tracking-widest">
+                  {user.monetizationStatus === 'approved' ? 'Earnings' : 'Monetize'}
+                </span>
+              </motion.button>
+              
+              <motion.button 
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setActiveTab('wallet')}
+                className="flex items-center justify-center space-x-2 p-4 rounded-2xl bg-zinc-900 border border-white/5 text-white transition-all"
+              >
+                <Wallet size={18} />
+                <span className="text-xs font-black uppercase tracking-widest">Wallet</span>
+              </motion.button>
+            </div>
+          )}
 
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
@@ -1621,15 +1715,24 @@ export const Profile: React.FC<{
               
               <div className="flex flex-col items-center space-y-6">
                 <div className="relative group">
-                  <div className="w-24 h-24 rounded-full border-4 border-zinc-800 overflow-hidden bg-zinc-900">
+                  <div className="w-28 h-28 rounded-full border-4 border-zinc-800 overflow-hidden bg-zinc-900 relative">
                     <img src={editImage} alt="Preview" className="w-full h-full object-cover" />
+                    {isUploading && (
+                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                        <Loader2 className="animate-spin text-rose-500" />
+                      </div>
+                    )}
                   </div>
-                  <button 
-                    onClick={() => setEditImage(`https://picsum.photos/seed/${Math.random()}/200/200`)}
-                    className="absolute bottom-0 right-0 bg-rose-500 p-2 rounded-full border-2 border-zinc-900 text-white hover:bg-rose-600 transition-colors"
-                  >
+                  <label className="absolute bottom-0 right-0 bg-rose-500 p-2 rounded-full border-2 border-zinc-900 text-white cursor-pointer hover:bg-rose-600 transition-colors shadow-lg">
                     <Camera size={16} />
-                  </button>
+                    <input 
+                      type="file" 
+                      className="hidden" 
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      disabled={isUploading}
+                    />
+                  </label>
                 </div>
 
                 <div className="w-full space-y-4">
@@ -1646,13 +1749,18 @@ export const Profile: React.FC<{
 
                   <div>
                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Profile Image URL</label>
-                    <input 
-                      type="text"
-                      value={editImage}
-                      onChange={(e) => setEditImage(e.target.value)}
-                      placeholder="https://example.com/image.jpg"
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 px-4 mt-1 focus:outline-none focus:border-rose-500 transition-colors font-medium text-xs"
-                    />
+                    <div className="relative mt-1">
+                      <div className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500">
+                        <LinkIcon size={14} />
+                      </div>
+                      <input 
+                        type="text"
+                        value={editImage}
+                        onChange={(e) => setEditImage(e.target.value)}
+                        placeholder="https://example.com/image.jpg"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-10 pr-4 focus:outline-none focus:border-rose-500 transition-colors font-medium text-xs"
+                      />
+                    </div>
                   </div>
 
                   <div>
@@ -1877,14 +1985,19 @@ export const Profile: React.FC<{
                 <div className="w-full flex flex-col space-y-3 pt-4">
                   <button 
                     onClick={handleUpdateProfile}
-                    disabled={isSaving}
-                    className="w-full bg-rose-500 text-white py-4 rounded-2xl font-bold hover:bg-rose-600 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
+                    disabled={isSaving || isUploading || !editName.trim()}
+                    className="w-full bg-rose-500 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-rose-600 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2 shadow-xl shadow-rose-500/20"
                   >
-                    {isSaving ? <Loader2 className="animate-spin" size={20} /> : <span>Save Changes</span>}
+                    {isSaving ? <Loader2 className="animate-spin" size={20} /> : (
+                      <>
+                        <CheckCircle2 size={18} />
+                        <span>Save Changes</span>
+                      </>
+                    )}
                   </button>
                   <button 
                     onClick={() => setShowEditModal(false)}
-                    className="w-full bg-zinc-800 text-white py-4 rounded-2xl font-bold hover:bg-zinc-700 transition-colors"
+                    className="w-full bg-zinc-800 text-white py-4 rounded-2xl font-bold uppercase tracking-widest hover:bg-zinc-700 transition-colors"
                   >
                     Cancel
                   </button>
@@ -1910,7 +2023,7 @@ export const Profile: React.FC<{
       </AnimatePresence>
       {/* Monetization Modal */}
       <AnimatePresence>
-        {showMonetizationModal && (
+        {showMonetizationModal && user && (
           <MonetizationDashboard 
             user={user} 
             videosCount={userVideos.length}

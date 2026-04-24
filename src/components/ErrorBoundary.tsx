@@ -1,25 +1,22 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { AlertTriangle, RefreshCcw, Home } from 'lucide-react';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 
-interface ErrorBoundaryProps {
+interface Props {
   children: ReactNode;
 }
 
-interface ErrorBoundaryState {
+interface State {
   hasError: boolean;
   error: Error | null;
 }
 
-export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = {
-      hasError: false,
-      error: null
-    };
-  }
+export class ErrorBoundary extends Component<Props, State> {
+  public state: State = {
+    hasError: false,
+    error: null
+  };
 
-  public static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  public static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
@@ -29,46 +26,43 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   private handleReset = () => {
     this.setState({ hasError: false, error: null });
-    window.location.href = '/';
+    window.location.reload();
   };
 
   public render() {
     if (this.state.hasError) {
+      let errorMessage = "An unexpected error occurred.";
+      let errorDetail = "";
+
+      try {
+        if (this.state.error?.message) {
+          const parsed = JSON.parse(this.state.error.message);
+          if (parsed.error) {
+            errorMessage = "Firestore Permission Denied or Configuration Error";
+            errorDetail = `Operation: ${parsed.operationType} on ${parsed.path}`;
+          }
+        }
+      } catch (e) {
+        errorMessage = this.state.error?.message || errorMessage;
+      }
+
       return (
         <div className="h-screen w-full bg-black flex flex-col items-center justify-center p-8 text-center">
-          <div className="w-20 h-20 bg-rose-500/10 rounded-full flex items-center justify-center text-rose-500 mb-6 border border-rose-500/20">
-            <AlertTriangle size={40} />
+          <div className="w-20 h-20 bg-rose-500/10 rounded-full flex items-center justify-center text-rose-500 mb-6">
+            <AlertCircle size={40} />
           </div>
           <h2 className="text-2xl font-black uppercase tracking-tighter italic mb-2">Something went wrong</h2>
-          <p className="text-zinc-500 text-sm mb-8 max-w-xs mx-auto">
-            An unexpected error occurred. We've been notified and are working on it.
-          </p>
-          
-          <div className="flex flex-col space-y-3 w-full max-w-xs">
-            <button 
-              onClick={() => window.location.reload()}
-              className="w-full bg-white text-black py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center space-x-2 hover:bg-zinc-200 transition-all"
-            >
-              <RefreshCcw size={14} />
-              <span>Reload App</span>
-            </button>
-            <button 
-              onClick={this.handleReset}
-              className="w-full bg-zinc-900 text-white border border-white/5 py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center space-x-2 hover:bg-zinc-800 transition-all"
-            >
-              <Home size={14} />
-              <span>Back to Home</span>
-            </button>
-          </div>
-
-          {process.env.NODE_ENV === 'development' && this.state.error && (
-            <div className="mt-12 p-4 bg-zinc-900 rounded-xl border border-white/5 text-left w-full max-w-md overflow-auto">
-              <p className="text-rose-500 font-mono text-[10px] mb-2">Error Details:</p>
-              <pre className="text-zinc-500 font-mono text-[10px] whitespace-pre-wrap">
-                {this.state.error.stack}
-              </pre>
-            </div>
+          <p className="text-zinc-500 text-sm mb-4">{errorMessage}</p>
+          {errorDetail && (
+            <p className="text-zinc-600 text-[10px] font-bold uppercase tracking-widest mb-8">{errorDetail}</p>
           )}
+          <button 
+            onClick={this.handleReset}
+            className="bg-rose-500 text-white px-8 py-3 rounded-2xl font-bold text-sm hover:bg-rose-600 transition-colors flex items-center space-x-2"
+          >
+            <RefreshCw size={18} />
+            <span>Try Again</span>
+          </button>
         </div>
       );
     }

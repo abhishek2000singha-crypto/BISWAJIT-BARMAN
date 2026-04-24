@@ -3,14 +3,8 @@ import { getAuth } from 'firebase/auth';
 import { initializeFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "dummy_key",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "dummy_project",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-};
+// Import the Firebase configuration from the auto-generated file
+import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase safely
 let app;
@@ -22,13 +16,18 @@ try {
 }
 
 export const auth = getAuth(app);
+
 // Use long polling for better resilience in proxied or restricted network environments
+// Respect the named database if provided in the config
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
+  ...(firebaseConfig.firestoreDatabaseId ? { databaseId: firebaseConfig.firestoreDatabaseId } : {})
 });
+
 export const storage = getStorage(app);
 
-const API_KEY = import.meta.env.VITE_FIREBASE_API_KEY;
+// Determine if we are in demo mode based on the API key
+const API_KEY = firebaseConfig.apiKey;
 export const isDemoMode = !API_KEY || 
   API_KEY === "dummy_key" || 
   API_KEY.includes("YOUR_") || 

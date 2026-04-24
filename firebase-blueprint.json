@@ -1,0 +1,136 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Unique identifier for the user" },
+        "name": { "type": "string", "description": "Display name of the user" },
+        "bio": { "type": "string", "description": "Short biography of the user" },
+        "profileImage": { "type": "string", "format": "url", "description": "URL of the profile picture" },
+        "mobile": { "type": "string", "description": "Mobile number of the user" },
+        "role": { "type": "string", "enum": ["user", "admin", "banned"], "description": "User role" },
+        "followersCount": { "type": "integer", "description": "Number of followers" },
+        "followingCount": { "type": "integer", "description": "Number of users followed" },
+        "totalLikes": { "type": "integer", "description": "Total likes received" },
+        "totalViews": { "type": "integer", "description": "Total views received" },
+        "videosCount": { "type": "integer", "description": "Total videos uploaded" },
+        "monetizationStatus": { "type": "string", "enum": ["none", "pending", "approved", "rejected"], "description": "Monetization status" },
+        "monetizationDate": { "type": "integer", "description": "Timestamp of monetization approval" },
+        "totalWatchTime": { "type": "integer", "description": "Total watch time in seconds" },
+        "referralCode": { "type": "string", "description": "User's unique referral code" },
+        "referredBy": { "type": "string", "description": "UID of the user who referred this user" },
+        "earnings": {
+          "type": "object",
+          "properties": {
+            "likes": { "type": "number" },
+            "comments": { "type": "number" },
+            "watchTime": { "type": "number" },
+            "referrals": { "type": "number" },
+            "posts": { "type": "number" }
+          }
+        },
+        "walletBalance": { "type": "number", "description": "Current wallet balance" },
+        "createdAt": { "type": "integer", "description": "Timestamp of account creation" },
+        "isProfileSetupComplete": { "type": "boolean", "description": "Whether the user has completed their profile setup" },
+        "socialLinks": {
+          "type": "object",
+          "properties": {
+            "instagram": { "type": "string" },
+            "twitter": { "type": "string" },
+            "youtube": { "type": "string" }
+          }
+        },
+        "bankAccountNumber": { "type": "string" },
+        "bankName": { "type": "string" },
+        "ifscCode": { "type": "string" },
+        "accountHolderName": { "type": "string" }
+      },
+      "required": ["uid", "name", "mobile"]
+    },
+    "Video": {
+      "title": "Video",
+      "description": "Video content information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorPhoto": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "thumbnailUrl": { "type": "string" },
+        "caption": { "type": "string" },
+        "likesCount": { "type": "integer" },
+        "viewsCount": { "type": "integer" },
+        "sharesCount": { "type": "integer" },
+        "commentsCount": { "type": "integer" },
+        "createdAt": { "type": "integer" },
+        "isBoosted": { "type": "boolean" },
+        "boostExpiry": { "type": "integer" }
+      },
+      "required": ["userId", "videoUrl"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "Video comment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "videoId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userPhoto": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "integer" }
+      },
+      "required": ["videoId", "userId", "text"]
+    },
+    "Follow": {
+      "title": "Follow",
+      "description": "User follow relationship",
+      "type": "object",
+      "properties": {
+        "followerId": { "type": "string" },
+        "followingId": { "type": "string" },
+        "createdAt": { "type": "integer" }
+      },
+      "required": ["followerId", "followingId"]
+    },
+    "BoostTransaction": {
+      "title": "BoostTransaction",
+      "description": "Video boost purchase",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "videoId": { "type": "string" },
+        "planId": { "type": "string" },
+        "amount": { "type": "number" },
+        "createdAt": { "type": "integer" }
+      },
+      "required": ["userId", "videoId", "planId", "amount"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "/videos/{videoId}": {
+      "schema": "Video",
+      "description": "Video content documents"
+    },
+    "/comments/{commentId}": {
+      "schema": "Comment",
+      "description": "Comment documents"
+    },
+    "/follows/{followId}": {
+      "schema": "Follow",
+      "description": "Follow relationship documents"
+    },
+    "/boost_transactions/{txId}": {
+      "schema": "BoostTransaction",
+      "description": "Boost transaction documents"
+    }
+  }
+}

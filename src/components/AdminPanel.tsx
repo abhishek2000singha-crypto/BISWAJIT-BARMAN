@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Video, TrendingUp, DollarSign, ShieldCheck, Ban, Trash2, CheckCircle, XCircle, Loader2, CreditCard, AlertTriangle, LogOut, Search, Landmark, ChevronDown, ChevronUp, Sparkles, Gift, IndianRupee, Wallet, Plus, ClipboardList, Clock, CheckCircle2, X, Calendar, CloudUpload, Rocket, UserPlus, Activity, BarChart3, PieChart as PieChartIcon, Send } from 'lucide-react';
+import { Users, Video, TrendingUp, DollarSign, ShieldCheck, Ban, Trash2, CheckCircle, XCircle, Loader2, CreditCard, AlertTriangle, LogOut, Search, Landmark, ChevronDown, ChevronUp, Sparkles, Gift, IndianRupee, Wallet, Plus, ClipboardList, Clock, CheckCircle2, X, Calendar, CloudUpload, Rocket, UserPlus, Activity, BarChart3, PieChart as PieChartIcon, Send, History } from 'lucide-react';
 import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, orderBy, getDocs, writeBatch, getDoc, increment, addDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { User as UserType, Video as VideoType, BoostTransaction, AdminTask } from '../types';
@@ -291,22 +291,33 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
     setActionLoading(userId);
     try {
       const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, { monetizationStatus: status });
+      const updateData: any = { 
+        monetizationStatus: status,
+        updatedAt: Date.now()
+      };
+      
+      if (status === 'approved') {
+        updateData.monetizationDate = Date.now();
+      }
+      
+      await updateDoc(userRef, updateData);
 
       // Send notification
       sendNotification({
         userId: userId,
         senderId: currentUser.uid,
         senderName: 'System',
-        senderProfileImage: 'https://api.dicebear.com/7.x/avataaars/svg?seed=admin',
+        senderProfileImage: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png',
         type: 'monetization',
         message: status === 'approved' 
           ? 'Congratulations! Your monetization request has been approved. You can now earn from your content.' 
           : 'Your monetization request has been rejected. Please review our policies and try again.'
       });
+      
+      showSuccess(`Monetization request ${status} for user.`);
     } catch (error) {
       console.error(error);
-      alert("Failed to update status.");
+      showError(`Failed to ${status} monetization request.`);
     } finally {
       setActionLoading(null);
     }
@@ -317,20 +328,27 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
     setIsLoading(true);
     try {
       const batch = writeBatch(db);
+      const now = Date.now();
+      
       pendingUsers.forEach(user => {
         const userRef = doc(db, 'users', user.uid);
-        batch.update(userRef, { monetizationStatus: 'approved' });
+        batch.update(userRef, { 
+          monetizationStatus: 'approved',
+          monetizationDate: now,
+          updatedAt: now
+        });
 
         // Send notification
         sendNotification({
           userId: user.uid,
           senderId: currentUser.uid,
           senderName: 'System',
-          senderProfileImage: 'https://api.dicebear.com/7.x/avataaars/svg?seed=admin',
+          senderProfileImage: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png',
           type: 'monetization',
           message: 'Congratulations! Your monetization request has been approved. You can now earn from your content.'
         });
       });
+      
       await batch.commit();
       showSuccess(`Successfully approved ${pendingUsers.length} users!`);
     } catch (error) {
@@ -965,34 +983,22 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
                     <div className="flex items-center space-x-2">
                       <p className="text-[10px] text-zinc-500 font-bold">Created by: @{task.createdByName}</p>
                     </div>
-                    <div className="flex space-x-2">
-                      {task.status !== 'completed' && (
-                        <>
-                          {task.status === 'pending' && (
-                            <button 
-                              onClick={() => handleUpdateTaskStatus(task.id, 'in_progress')}
-                              disabled={actionLoading === task.id}
-                              className="bg-blue-500/10 text-blue-500 px-4 py-1.5 rounded-xl text-[10px] font-bold hover:bg-blue-500/20 transition-colors"
-                            >
-                              Start Task
-                            </button>
-                          )}
-                          {task.status === 'in_progress' && (
-                            <button 
-                              onClick={() => handleUpdateTaskStatus(task.id, 'completed')}
-                              disabled={actionLoading === task.id}
-                              className="bg-emerald-500/10 text-emerald-500 px-4 py-1.5 rounded-xl text-[10px] font-bold hover:bg-emerald-500/20 transition-colors"
-                            >
-                              Complete
-                            </button>
-                          )}
-                        </>
-                      )}
-                      {task.status === 'completed' && (
-                        <div className="flex items-center space-x-1 text-emerald-500 text-[10px] font-bold">
-                          <CheckCircle2 size={12} />
-                          <span>Finished</span>
-                        </div>
+                    <div className="flex items-center space-x-3">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Status:</span>
+                        <select 
+                          value={task.status}
+                          onChange={(e) => handleUpdateTaskStatus(task.id, e.target.value as AdminTask['status'])}
+                          disabled={actionLoading === task.id}
+                          className="bg-zinc-950 border border-white/10 rounded-lg py-1.5 px-3 text-[10px] font-bold text-zinc-300 focus:outline-none focus:border-rose-500 transition-all cursor-pointer hover:bg-zinc-900"
+                        >
+                          <option value="pending">Pending</option>
+                          <option value="in_progress">In Progress</option>
+                          <option value="completed">Completed</option>
+                        </select>
+                      </div>
+                      {actionLoading === task.id && (
+                        <Loader2 size={14} className="animate-spin text-rose-500" />
                       )}
                     </div>
                   </div>
@@ -1277,17 +1283,20 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
       )}
 
       {activeTab === 'users' && (
-        <div className="space-y-4">
+        <div className="space-y-6">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">User Management</h3>
+            <div>
+              <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">User Management</h3>
+              <p className="text-[10px] text-zinc-500 mt-1">Total platform users: {allUsers.length}</p>
+            </div>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
               <input 
                 type="text"
-                placeholder="Search users..."
+                placeholder="Search name or mobile..."
                 value={userSearchQuery}
                 onChange={(e) => setUserSearchQuery(e.target.value)}
-                className="bg-zinc-900 border border-zinc-800 rounded-xl py-2 pl-9 pr-8 text-xs focus:outline-none focus:border-rose-500 transition-colors w-48"
+                className="bg-zinc-900 border border-zinc-800 rounded-xl py-2 pl-9 pr-8 text-xs focus:outline-none focus:border-rose-500 transition-colors w-64"
               />
               {userSearchQuery && (
                 <button 
@@ -1299,26 +1308,95 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
               )}
             </div>
           </div>
-          <div className="space-y-2">
-            {allUsers
-              .filter(u => u.name.toLowerCase().includes(userSearchQuery.toLowerCase()))
-              .map(user => (
-              <div key={user.uid} className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <img src={user.profileImage} className="w-10 h-10 rounded-full object-cover" alt="" />
-                  <div>
-                    <p className="font-bold text-sm">{user.name}</p>
-                    <p className="text-[10px] text-zinc-500">{user.role.toUpperCase()}</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => handleUserAction(user.uid, user.role)}
-                  className={`p-2 rounded-lg transition-colors ${user.role === 'user' ? 'bg-rose-500/10 text-rose-500 hover:bg-rose-500/20' : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20'}`}
-                >
-                  {user.role === 'user' ? <Ban size={18} /> : <CheckCircle size={18} />}
-                </button>
-              </div>
-            ))}
+
+          <div className="bg-zinc-900 border border-zinc-800 rounded-[32px] overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-black/20 border-b border-white/5">
+                    <th className="px-6 py-4 text-[10px] font-black text-zinc-500 uppercase tracking-widest">User</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-zinc-500 uppercase tracking-widest">Contact</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-zinc-500 uppercase tracking-widest">Status</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-zinc-500 uppercase tracking-widest">Wallet</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-zinc-500 uppercase tracking-widest text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {allUsers
+                    .filter(u => 
+                      u.name?.toLowerCase().includes(userSearchQuery.toLowerCase()) || 
+                      u.mobile?.includes(userSearchQuery)
+                    )
+                    .map(user => (
+                    <tr key={user.uid} className="hover:bg-white/5 transition-colors group">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center space-x-3">
+                          <div className="relative">
+                            <img src={user.profileImage} className="w-10 h-10 rounded-full object-cover border border-white/10" alt="" />
+                            {user.role === 'admin' && (
+                              <div className="absolute -top-1 -right-1 bg-amber-500 rounded-full p-0.5 border-2 border-zinc-900">
+                                <ShieldCheck size={8} className="text-white" />
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-bold text-sm">@{user.name}</p>
+                            <p className="text-[10px] text-zinc-500 uppercase font-bold tracking-tighter">
+                              Joined {user.createdAt ? format(user.createdAt, 'MMM yyyy') : 'Recently'}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-xs text-zinc-400 font-medium">{user.mobile || 'No mobile'}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={cn(
+                          "px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest",
+                          user.role === 'banned' ? "bg-rose-500/10 text-rose-500" : 
+                          user.role === 'admin' ? "bg-amber-500/10 text-amber-500" : "bg-emerald-500/10 text-emerald-500"
+                        )}>
+                          {user.role === 'banned' ? 'Banned' : user.role === 'admin' ? 'Admin' : 'Active'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-xs font-black text-emerald-500">₹{(user.walletBalance || 0).toLocaleString()}</span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        {user.uid !== currentUser.uid && user.role !== 'admin' ? (
+                          <button 
+                            onClick={() => handleUserAction(user.uid, user.role)}
+                            disabled={actionLoading === user.uid}
+                            className={cn(
+                              "inline-flex items-center space-x-2 px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all shadow-lg active:scale-95",
+                              user.role === 'banned' 
+                                ? "bg-emerald-500 text-white hover:bg-emerald-600 shadow-emerald-500/20" 
+                                : "bg-rose-500 text-white hover:bg-rose-600 shadow-rose-500/20"
+                            )}
+                          >
+                            {actionLoading === user.uid ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : user.role === 'banned' ? (
+                              <>
+                                <CheckCircle size={14} />
+                                <span>Unban User</span>
+                              </>
+                            ) : (
+                              <>
+                                <Ban size={14} />
+                                <span>Ban User</span>
+                              </>
+                            )}
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-zinc-600 font-bold uppercase italic">Protected</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -1634,6 +1712,47 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+
+          {/* Combined Transaction History */}
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-[32px]">
+            <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-6 flex items-center">
+              <History size={16} className="mr-2 text-blue-500" /> All Transaction History
+            </h3>
+            <div className="space-y-3">
+              {[
+                ...transactions.map(tx => ({ ...tx, type: 'boost', sortDate: tx.createdAt })),
+                ...superChats.map(chat => ({ ...chat, type: 'superchat', sortDate: chat.createdAt }))
+              ]
+                .sort((a, b) => b.sortDate - a.sortDate)
+                .slice(0, 50)
+                .map((item: any) => (
+                  <div key={item.id} className="bg-black/40 border border-white/5 p-4 rounded-2xl flex items-center justify-between">
+                    <div className="flex items-center space-x-4">
+                      <div className={cn(
+                        "w-10 h-10 rounded-xl flex items-center justify-center",
+                        item.type === 'boost' ? "bg-rose-500/10 text-rose-500" : "bg-amber-500/10 text-amber-500"
+                      )}>
+                        {item.type === 'boost' ? <Rocket size={20} /> : <Gift size={20} />}
+                      </div>
+                      <div>
+                        <p className="font-bold text-sm">
+                          {item.type === 'boost' ? `Boost: ${item.planName}` : `Super Chat from @${item.senderName}`}
+                        </p>
+                        <p className="text-[10px] text-zinc-500">
+                          {item.type === 'boost' ? `User: @${item.userId.slice(0, 8)}` : `To: @${item.receiverName}`} • {format(item.sortDate, 'dd MMM yyyy, HH:mm')}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-black text-emerald-500">₹{item.amount}</p>
+                      <p className="text-[8px] text-zinc-500 uppercase font-bold">
+                        {item.type === 'boost' ? 'Platform: 100%' : 'Platform: 30%'}
+                      </p>
+                    </div>
+                  </div>
+                ))}
             </div>
           </div>
         </div>

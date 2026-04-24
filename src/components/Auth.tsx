@@ -1,29 +1,39 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, Loader2, AlertCircle, X, CheckCircle2 } from 'lucide-react';
+import { ShieldCheck, Loader2, AlertCircle, X, CheckCircle2, Camera, Upload as UploadIcon, Link as LinkIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Logo, LogoText } from './Logo';
 import { cn } from '../utils';
 import { useError } from '../contexts/ErrorContext';
 import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { auth, db, isDemoMode } from '../services/firebase';
-import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
+import { auth, db, storage, isDemoMode } from '../services/firebase';
+import { handleFirestoreError, OperationType } from '../services/firestoreErrorHandler';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { User } from '../types';
 
-export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => void }> = ({ onLogin, onCancel }) => {
+export const Auth: React.FC<{ 
+  onLogin: (user: any) => void, 
+  onCancel?: () => void,
+  initialStep?: 'phone' | 'otp' | 'setup',
+  initialUser?: any
+}> = ({ onLogin, onCancel, initialStep, initialUser }) => {
   const { showError, showSuccess } = useError();
-  const [step, setStep] = useState<'phone' | 'otp' | 'setup'>('phone');
-  const [name, setName] = useState('');
-  const [bio, setBio] = useState('');
-  const [phone, setPhone] = useState('');
+  const [step, setStep] = useState<'phone' | 'otp' | 'setup'>(initialStep || 'phone');
+  const [name, setName] = useState(initialUser?.name || '');
+  const [bio, setBio] = useState(initialUser?.bio || '');
+  const [profileImage, setProfileImage] = useState(initialUser?.profileImage || '');
+  const [isUploading, setIsUploading] = useState(false);
+  const [phone, setPhone] = useState(initialUser?.mobile?.replace('+91', '') || '');
   const [otp, setOtp] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resendTimer, setResendTimer] = useState(0);
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
   const [demoOtp, setDemoOtp] = useState<string | null>(null);
-  const [pendingUser, setPendingUser] = useState<any>(null);
+  const [pendingUser, setPendingUser] = useState<any>(initialUser || null);
   const [recaptchaVerifier, setRecaptchaVerifier] = useState<RecaptchaVerifier | null>(null);
-  const [isNewUser, setIsNewUser] = useState(false);
+  const [referralCode, setReferralCode] = useState('');
+  const [isNewUser, setIsNewUser] = useState(!initialUser);
 
   useEffect(() => {
     return () => {
@@ -42,6 +52,68 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
     }
     return () => clearInterval(interval);
   }, [resendTimer]);
+
+  const handleGoogleLogin = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+      
+      const userDocRef = doc(db, 'users', user.uid);
+      const userDoc = await getDoc(userDocRef);
+      
+      if (userDoc.exists()) {
+        onLogin(userDoc.data());
+        showSuccess("Logged in successfully!");
+      } else {
+        const userData = {
+          uid: user.uid,
+          name: user.displayName || 'New User',
+          mobile: user.phoneNumber || '',
+          profileImage: user.photoURL || `https://picsum.photos/seed/${user.uid}/200/200`,
+          role: 'user',
+          followersCount: 0,
+          followingCount: 0,
+          totalLikes: 0,
+          totalViews: 0,
+          videosCount: 0,
+          totalWatchTime: 0,
+          monetizationStatus: 'none',
+          referralCode: user.uid.substring(0, 8).toUpperCase(),
+          earnings: {
+            likes: 0,
+            comments: 0,
+            watchTime: 0,
+            referrals: 0,
+            posts: 0
+          },
+          policyViolations: 0,
+          walletBalance: 0,
+          superChatBalance: 0,
+          createdAt: Date.now(),
+          isProfileSetupComplete: false
+        };
+        setPendingUser(userData);
+        setName(user.displayName || '');
+        setProfileImage(user.photoURL || userData.profileImage);
+        setStep('setup');
+        showSuccess("Google Login successful! Please complete your profile.");
+      }
+    } catch (err: any) {
+      console.error("Google Auth Error:", err);
+      let message = err.message;
+      if (err.code === 'auth/popup-closed-by-user') message = "Login popup was closed.";
+      if (err.code === 'auth/operation-not-allowed') {
+        message = "Google Login is not enabled in Firebase Console. Please enable it in Authentication > Sign-in method.";
+      }
+      setError(message);
+      showError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSendOTP = async () => {
     if (phone.length < 10) return;
@@ -75,6 +147,10 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
         // Initialize Recaptcha
         let verifier = recaptchaVerifier;
         if (!verifier) {
+          const container = document.getElementById('recaptcha-container');
+          if (!container) {
+            throw new Error("reCAPTCHA container not found. Please refresh the page.");
+          }
           verifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
             size: 'invisible',
             callback: () => {
@@ -104,14 +180,17 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
         errorString.includes('invalid-api-key') ||
         errorCode.includes('api-key-not-valid') ||
         errorCode.includes('invalid-api-key') ||
-        errorString.includes('restricted-client')
+        errorString.includes('restricted-client') ||
+        errorCode === 'auth/operation-not-allowed' ||
+        errorString.includes('operation-not-allowed')
       ) {
-        console.warn("Firebase configuration error detected. Falling back to demo mode.");
+        console.warn("Firebase configuration error detected (likely Phone Auth is disabled). Falling back to demo mode.");
         await new Promise(r => setTimeout(r, 1000));
         setDemoOtp("123456");
         setStep('otp');
         setResendTimer(60);
-        showSuccess("Demo Mode: Activated (Configuration issue detected)");
+        setError(null); // Clear error state when entering demo mode
+        showSuccess("Demo Mode: Activated (Phone Auth is disabled in Firebase Console)");
         setIsLoading(false);
         return;
       }
@@ -119,6 +198,12 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
       let message = err.message;
       if (err.code === 'auth/invalid-phone-number') message = "Invalid phone number format.";
       if (err.code === 'auth/too-many-requests') message = "Too many requests. Please try again later.";
+      if (err.code === 'auth/operation-not-allowed') {
+        message = "Phone Authentication is not enabled in your Firebase Console. Please enable it in Authentication > Sign-in method, or use Google Login.";
+      }
+      if (err.code === 'auth/internal-error') {
+        message = "Firebase internal error. This often happens if Phone Auth is disabled or reCAPTCHA failed. Try Google Login instead.";
+      }
       
       setError(message);
       showError(message || "Failed to send OTP. Please check your connection.");
@@ -163,24 +248,37 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
       let userData: any;
 
       if (isNewUser) {
+        const defaultImage = `https://picsum.photos/seed/${phone}/200/200`;
         userData = {
           uid,
           name: phone,
           mobile: `+91${phone}`,
-          profileImage: `https://picsum.photos/seed/${phone}/200/200`,
+          profileImage: defaultImage,
           role: phone === "9999999999" ? 'admin' : 'user',
           followersCount: 0,
           followingCount: 0,
           totalLikes: 0,
           totalViews: 0,
+          videosCount: 0,
+          totalWatchTime: 0,
           monetizationStatus: 'none',
+          referralCode: uid.substring(0, 8).toUpperCase(),
+          earnings: {
+            likes: 0,
+            comments: 0,
+            watchTime: 0,
+            referrals: 0,
+            posts: 0
+          },
           policyViolations: 0,
           walletBalance: 0,
           superChatBalance: 0,
-          createdAt: Date.now()
+          createdAt: Date.now(),
+          isProfileSetupComplete: false
         };
         setPendingUser(userData);
-        setName(phone);
+        setName('');
+        setProfileImage(defaultImage);
         setStep('setup');
         showSuccess("OTP Verified! Let's set up your profile.");
       } else {
@@ -222,6 +320,42 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
     }
   };
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !pendingUser) return;
+
+    if (!file.type.startsWith('image/')) {
+      showError("Please select an image file");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      showError("Image size should be less than 5MB");
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      if (isDemoMode) {
+        // In demo mode, just create a local URL
+        const localUrl = URL.createObjectURL(file);
+        setProfileImage(localUrl);
+        showSuccess("Image selected (Demo Mode)");
+      } else {
+        const storageRef = ref(storage, `profiles/${pendingUser.uid}_${Date.now()}`);
+        await uploadBytes(storageRef, file);
+        const url = await getDownloadURL(storageRef);
+        setProfileImage(url);
+        showSuccess("Profile picture uploaded!");
+      }
+    } catch (err) {
+      console.error("Upload Error:", err);
+      showError("Failed to upload image. Please try again.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleFinalizeSignup = async () => {
     if (!pendingUser) return;
     if (!name.trim()) {
@@ -230,10 +364,22 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
     }
     setIsLoading(true);
     try {
+      let referredBy = null;
+      if (referralCode.trim()) {
+        const q = query(collection(db, 'users'), where('referralCode', '==', referralCode.trim()));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          referredBy = snap.docs[0].id;
+        }
+      }
+
       const finalUser = {
         ...pendingUser,
         name: name.trim(),
-        bio: bio.trim()
+        bio: bio.trim(),
+        profileImage: profileImage || pendingUser.profileImage,
+        referredBy,
+        isProfileSetupComplete: true
       };
       
       // Save to Firestore if not in demo mode
@@ -250,6 +396,11 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
           ]);
         } catch (err) {
           console.warn("Firestore save failed or timed out, relying on localStorage:", err);
+          try {
+            handleFirestoreError(err, OperationType.WRITE, `users/${finalUser.uid}`);
+          } catch (e) {
+            // Already logged/thrown, continue for resilience
+          }
         }
       }
       
@@ -287,7 +438,7 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
 
         <LogoText className="mb-2 justify-center" />
         <p className="text-zinc-500 text-sm mb-8">
-          Enter your mobile number to continue
+          Sign in to your account to continue
         </p>
 
         {error && (
@@ -324,7 +475,25 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
                 disabled={phone.length < 10 || isLoading}
                 className="w-full py-4 rounded-2xl font-bold transition-all flex items-center justify-center space-x-2 mt-4 bg-rose-500 text-white hover:bg-rose-600"
               >
-                {isLoading ? <Loader2 className="animate-spin" /> : <span>Continue</span>}
+                {isLoading ? <Loader2 className="animate-spin" /> : <span>Continue with Phone</span>}
+              </button>
+
+              <div className="relative my-8">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-zinc-800"></div>
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-black px-4 text-zinc-500 font-bold tracking-widest">Or</span>
+                </div>
+              </div>
+
+              <button 
+                onClick={handleGoogleLogin}
+                disabled={isLoading}
+                className="w-full py-4 rounded-2xl font-bold transition-all flex items-center justify-center space-x-3 bg-white text-black hover:bg-zinc-200"
+              >
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
+                <span>Continue with Google</span>
               </button>
             </motion.div>
           ) : step === 'otp' ? (
@@ -392,41 +561,85 @@ export const Auth: React.FC<{ onLogin: (user: any) => void, onCancel?: () => voi
               className="space-y-6"
             >
               <div className="flex flex-col items-center space-y-4">
-                <div className="w-24 h-24 rounded-full border-4 border-rose-500/20 p-1">
-                  <img 
-                    src={pendingUser?.profileImage} 
-                    alt="Profile Preview" 
-                    className="w-full h-full rounded-full object-cover"
-                  />
+                <div className="relative group">
+                  <div className="w-28 h-28 rounded-full border-4 border-rose-500/20 p-1 relative overflow-hidden bg-zinc-900">
+                    <img 
+                      src={profileImage || pendingUser?.profileImage} 
+                      alt="Profile Preview" 
+                      className="w-full h-full rounded-full object-cover"
+                    />
+                    {isUploading && (
+                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                        <Loader2 className="animate-spin text-rose-500" />
+                      </div>
+                    )}
+                  </div>
+                  <label className="absolute bottom-0 right-0 bg-rose-500 p-2 rounded-full border-4 border-black cursor-pointer hover:bg-rose-600 transition-colors shadow-lg">
+                    <Camera size={16} className="text-white" />
+                    <input 
+                      type="file" 
+                      className="hidden" 
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      disabled={isUploading}
+                    />
+                  </label>
                 </div>
-                <div>
-                  <h4 className="text-lg font-black">{name || pendingUser?.name}</h4>
-                  <p className="text-zinc-500 text-xs">{pendingUser?.mobile}</p>
+                <div className="text-center">
+                  <h4 className="text-lg font-black uppercase tracking-tighter italic">Complete Your Profile</h4>
+                  <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mt-1">Tell the community who you are</p>
                 </div>
               </div>
 
               <div className="space-y-4">
-                <input 
-                  type="text"
-                  placeholder="Full Name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl py-4 px-4 focus:outline-none focus:border-rose-500 transition-colors font-bold"
-                />
-                <textarea 
-                  placeholder="Tell us about yourself (Bio)"
-                  value={bio}
-                  onChange={(e) => setBio(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl py-4 px-4 focus:outline-none focus:border-rose-500 transition-colors font-bold min-h-[100px] resize-none"
-                />
+                <div className="relative">
+                  <input 
+                    type="text"
+                    placeholder="Display Name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl py-4 px-4 focus:outline-none focus:border-rose-500 transition-colors font-bold"
+                  />
+                </div>
+
+                <div className="relative">
+                  <textarea 
+                    placeholder="Bio (e.g. Creator, Dancer, Visionary)"
+                    value={bio}
+                    onChange={(e) => setBio(e.target.value)}
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl py-4 px-4 focus:outline-none focus:border-rose-500 transition-colors font-bold min-h-[100px] resize-none"
+                  />
+                </div>
+
+                <div className="relative">
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500">
+                    <LinkIcon size={16} />
+                  </div>
+                  <input 
+                    type="url"
+                    placeholder="Profile Image URL (Optional)"
+                    value={profileImage}
+                    onChange={(e) => setProfileImage(e.target.value)}
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:border-rose-500 transition-colors font-bold text-xs"
+                  />
+                </div>
+                <div className="relative">
+                  <input 
+                    type="text"
+                    placeholder="Referral Code (Optional)"
+                    value={referralCode}
+                    onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl py-4 px-4 focus:outline-none focus:border-rose-500 transition-colors font-bold uppercase tracking-widest text-xs"
+                  />
+                </div>
               </div>
 
               <button 
                 onClick={handleFinalizeSignup}
-                disabled={isLoading}
-                className="w-full bg-rose-500 text-white py-4 rounded-2xl font-bold hover:bg-rose-600 transition-colors flex items-center justify-center space-x-2"
+                disabled={isLoading || isUploading || !name.trim()}
+                className="w-full bg-rose-500 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-rose-600 transition-colors flex items-center justify-center space-x-2 shadow-xl shadow-rose-500/20 disabled:opacity-50"
               >
-                {isLoading ? <Loader2 className="animate-spin" /> : <span>Complete Setup</span>}
+                {isLoading ? <Loader2 className="animate-spin" /> : <span>Start Creating</span>}
               </button>
             </motion.div>
           )}

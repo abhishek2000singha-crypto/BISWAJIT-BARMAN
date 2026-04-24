@@ -13,6 +13,7 @@ import confetti from 'canvas-confetti';
 import { sendNotification } from '../services/notificationService';
 import { useError } from '../contexts/ErrorContext';
 import { trackInteraction } from '../services/interactionService';
+import { rewardForAction } from '../services/monetizationService';
 
 interface VideoCardProps {
   video: Video;
@@ -299,6 +300,9 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
           if (auth.currentUser) {
             trackInteraction(auth.currentUser.uid, video.id, video.userId, 'watch_time', 1);
             
+            // Reward creator for watch time
+            rewardForAction(video.userId, 'watch', 1);
+
             // If watched more than 80% of video, track as complete watch
             if (video.duration && secondsWatched >= video.duration * 0.8 && secondsWatched < video.duration * 0.8 + 1) {
               trackInteraction(auth.currentUser.uid, video.id, video.userId, 'complete_watch');
@@ -484,6 +488,9 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
         setTimeout(() => setShowHeartAnim(false), 1000);
 
         trackInteraction(auth.currentUser.uid, video.id, video.userId, 'like');
+        
+        // Reward creator for like
+        rewardForAction(video.userId, 'like', 1);
 
         // Send notification
         if (currentUser && currentUser.uid !== video.userId) {

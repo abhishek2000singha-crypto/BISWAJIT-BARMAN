@@ -127,10 +127,21 @@ export const MonetizationDashboard: React.FC<MonetizationDashboardProps> = ({ us
   const isEligible = criteria.every(c => c.isMet);
 
   const revenueBreakdown = [
-    { views: '1,000', amount: '0.50' },
-    { views: '10,000', amount: '10' },
-    { views: '50,000', amount: '50' },
-    { views: '100,000', amount: '100' },
+    { label: '100 Likes', amount: '20' },
+    { label: '100 Comments', amount: '25' },
+    { label: '1 Hour Watch', amount: '60' },
+    { label: 'Photo Post', amount: '5' },
+    { label: 'Video Post', amount: '10' },
+    { label: 'Follow Someone', amount: '2' },
+    { label: 'Referral', amount: 'Lifetime' },
+  ];
+
+  const features = [
+    { icon: <Trophy className="text-amber-500" size={16} />, text: "Easy Monetization: 300 followers, 10k views, or 50 videos" },
+    { icon: <Users className="text-blue-500" size={16} />, text: "Lifetime Referral Income: Earn commission for life" },
+    { icon: <Grid className="text-rose-500" size={16} />, text: "Earn by posting photos & videos" },
+    { icon: <ShieldAlert className="text-emerald-500" size={16} />, text: "No copyright or restrictions" },
+    { icon: <IndianRupee className="text-amber-500" size={16} />, text: "First payment within 45 days" },
   ];
 
   return (
@@ -158,6 +169,18 @@ export const MonetizationDashboard: React.FC<MonetizationDashboardProps> = ({ us
             <h3 className="text-2xl font-bold">Creator Fund</h3>
             <p className="text-zinc-500 text-sm">Monetize your creativity</p>
           </div>
+        </div>
+
+        {/* Features List */}
+        <div className="mb-8 space-y-3">
+          {features.map((feature, idx) => (
+            <div key={idx} className="flex items-center space-x-3 bg-white/5 p-3 rounded-2xl border border-white/5">
+              <div className="w-8 h-8 rounded-xl bg-black/40 flex items-center justify-center shrink-0">
+                {feature.icon}
+              </div>
+              <p className="text-[11px] font-bold text-zinc-300 leading-tight">{feature.text}</p>
+            </div>
+          ))}
         </div>
 
         {user.monetizationStatus === 'approved' ? (
@@ -192,11 +215,11 @@ export const MonetizationDashboard: React.FC<MonetizationDashboardProps> = ({ us
                   {revenueBreakdown.map((item, idx) => (
                     <div key={idx} className="bg-black/40 border border-white/5 rounded-xl p-3 flex justify-between items-center">
                       <div className="flex items-center space-x-2">
-                        <Eye size={12} className="text-zinc-500" />
-                        <span className="text-xs text-zinc-300 font-bold">{item.views}</span>
+                        <Trophy size={12} className="text-zinc-500" />
+                        <span className="text-xs text-zinc-300 font-bold">{item.label}</span>
                       </div>
                       <div className="flex items-center space-x-1 text-emerald-500 font-black text-xs">
-                        <IndianRupee size={10} />
+                        {item.amount !== 'Lifetime' && <IndianRupee size={10} />}
                         <span>{item.amount}</span>
                       </div>
                     </div>
@@ -366,11 +389,11 @@ export const MonetizationDashboard: React.FC<MonetizationDashboardProps> = ({ us
                 {revenueBreakdown.map((item, idx) => (
                   <div key={idx} className="bg-zinc-900/50 border border-white/5 rounded-xl p-3 flex justify-between items-center">
                     <div className="flex items-center space-x-2">
-                      <Eye size={12} className="text-zinc-500" />
-                      <span className="text-xs text-zinc-300 font-bold">{item.views}</span>
+                      <Trophy size={12} className="text-zinc-500" />
+                      <span className="text-xs text-zinc-300 font-bold">{item.label}</span>
                     </div>
                     <div className="flex items-center space-x-1 text-emerald-500 font-black text-xs">
-                      <IndianRupee size={10} />
+                      {item.amount !== 'Lifetime' && <IndianRupee size={10} />}
                       <span>{item.amount}</span>
                     </div>
                   </div>
