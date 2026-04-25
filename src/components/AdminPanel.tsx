@@ -88,6 +88,9 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
     const qPending = query(collection(db, 'users'), where('monetizationStatus', '==', 'pending'));
     const unsubPending = onSnapshot(qPending, (snapshot) => {
       setPendingUsers(snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id } as UserType)));
+    }, (error) => {
+      console.error("Error listening to pending monetization:", error);
+      showError("Failed to sync monetization requests");
     });
 
     // All Users
@@ -138,6 +141,9 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
       });
 
       setEarningsDistribution(ranges.filter(r => r.value > 0));
+    }, (error) => {
+      console.error("Error listening to users:", error);
+      showError("Failed to sync user data in real-time");
     });
 
     // All Videos
@@ -182,6 +188,9 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
         if (s.label === 'Avg Watch Time') return { ...s, value: `${Math.round(avg)}s` };
         return s;
       }));
+    }, (error) => {
+      console.error("Error listening to videos:", error);
+      showError("Failed to sync videos data");
     });
 
     // Transactions
@@ -194,6 +203,9 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
       setStats(prev => prev.map(s => 
         s.label === 'Total Boosted' ? { ...s, value: totalBoosted.toLocaleString() } : s
       ));
+    }, (error) => {
+      console.error("Error listening to transactions:", error);
+      showError("Failed to sync boost transactions");
     });
 
     // Super Chats
@@ -201,6 +213,9 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
     const unsubSuperChats = onSnapshot(qSuperChats, (snapshot) => {
       const chats = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
       setSuperChats([...chats].reverse());
+    }, (error) => {
+      console.error("Error listening to super chats:", error);
+      showError("Failed to sync super chat data");
     });
 
     // Withdrawal Requests
@@ -217,15 +232,21 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
       setStats(prev => prev.map(s => 
         s.label === 'Total Payouts' ? { ...s, value: `₹${completedPayouts.toLocaleString()}` } : s
       ));
+    }, (error) => {
+      console.error("Error listening to withdrawals:", error);
+      showError("Failed to sync withdrawal requests");
     });
 
     // Tasks
     const qTasks = query(collection(db, 'admin_tasks'), orderBy('createdAt', 'desc'));
     const unsubTasks = onSnapshot(qTasks, (snapshot) => {
       setTasks(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as AdminTask)));
+      setIsLoading(false); // Move to here - data is now ready
+    }, (error) => {
+      console.error("Error listening to tasks:", error);
+      showError("Failed to sync admin tasks in real-time");
+      setIsLoading(false);
     });
-
-    setIsLoading(false);
 
     return () => {
       unsubPending();
@@ -437,6 +458,7 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
       
       await addDoc(collection(db, 'admin_tasks'), taskData);
       setShowCreateTaskModal(false);
+      showSuccess("Task created and assigned successfully");
       setNewTask({
         title: '',
         description: '',
@@ -446,7 +468,7 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
       });
     } catch (error) {
       console.error(error);
-      alert("Failed to create task");
+      showError("Failed to create task");
     } finally {
       setActionLoading(null);
     }
@@ -459,9 +481,10 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
         status,
         updatedAt: Date.now()
       });
+      showSuccess(`Task marked as ${status.replace('_', ' ')}`);
     } catch (error) {
       console.error(error);
-      alert("Failed to update task");
+      showError("Failed to update task status");
     } finally {
       setActionLoading(null);
     }
