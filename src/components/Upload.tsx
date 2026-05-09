@@ -886,7 +886,7 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
                   {...getRootProps()} 
                   className={cn(
                     "h-full border-2 border-dashed rounded-[40px] flex flex-col items-center justify-center p-10 transition-all duration-500 group cursor-pointer relative overflow-hidden",
-                    isDragActive ? "border-rose-500 bg-rose-500/10 scale-[0.98]" : "border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900 hover:border-zinc-700"
+                    isDragActive ? "border-rose-500 bg-rose-500/10 scale-[0.98]" : "border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900 hover:border-zinc-700 active:scale-95"
                   )}
                 >
                   <input {...getInputProps()} />
@@ -901,39 +901,40 @@ export const Upload: React.FC<{ user: User, onComplete: () => void }> = ({ user,
                     </motion.div>
                   )}
 
-                  <div className="relative z-10 flex flex-col items-center">
+                  <div className="relative z-10 flex flex-col items-center w-full">
                     <div className="w-24 h-24 bg-zinc-800 rounded-[32px] flex items-center justify-center mb-8 group-hover:scale-110 group-hover:rotate-3 transition-all duration-500 shadow-2xl border border-white/5">
                       <UploadIcon className={cn("transition-colors duration-300", isDragActive ? "text-white" : "text-rose-500")} size={40} />
                     </div>
-                    <h3 className="text-2xl font-black mb-3 tracking-tighter uppercase italic">Select Video or Photo</h3>
-                    <p className="text-center text-zinc-500 text-sm max-w-[240px] font-medium leading-relaxed">
-                      Drag & drop your masterpiece here or click to browse files.
+                    <h3 className="text-2xl font-black mb-3 tracking-tighter uppercase italic">Create Masterpiece</h3>
+                    <p className="text-center text-zinc-500 text-sm max-w-[240px] font-medium leading-relaxed mb-8">
+                      Select a video or photo from your gallery to share with the world.
                     </p>
+
+                    <div className="flex flex-col w-full space-y-4 max-w-[280px]">
+                      <button 
+                        onClick={() => {
+                          const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+                          input?.click();
+                        }}
+                        className="w-full bg-rose-500 py-4 rounded-2xl font-black uppercase tracking-widest text-sm shadow-[0_8px_30px_rgb(244,63,94,0.3)] hover:bg-rose-600 transition-all flex items-center justify-center text-white"
+                      >
+                        Choose from Gallery
+                      </button>
+                      
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openCamera();
+                        }}
+                        className="w-full bg-white/5 border border-white/10 py-4 rounded-2xl font-black uppercase tracking-widest text-sm hover:bg-white/10 transition-all flex items-center justify-center space-x-2"
+                      >
+                        <Camera size={18} />
+                        <span>Record Now</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </motion.div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <button 
-                  onClick={openCamera}
-                  className="bg-zinc-900 border border-white/5 p-6 rounded-[32px] flex flex-col items-center justify-center space-y-3 hover:bg-zinc-800 transition-all group"
-                >
-                  <div className="w-12 h-12 bg-rose-500/10 rounded-2xl flex items-center justify-center text-rose-500 group-hover:scale-110 transition-transform">
-                    <Camera size={24} />
-                  </div>
-                  <span className="text-[10px] font-black uppercase tracking-widest">Record Video</span>
-                </button>
-
-                <button 
-                  onClick={() => (document.querySelector('input[type="file"]') as HTMLInputElement)?.click()}
-                  className="bg-zinc-900 border border-white/5 p-6 rounded-[32px] flex flex-col items-center justify-center space-y-3 hover:bg-zinc-800 transition-all group"
-                >
-                  <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-500 group-hover:scale-110 transition-transform">
-                    <UploadIcon size={24} />
-                  </div>
-                  <span className="text-[10px] font-black uppercase tracking-widest">Choose File</span>
-                </button>
-              </div>
             </>
           )}
           

@@ -65,7 +65,15 @@ export const Auth: React.FC<{
       const userDoc = await getDoc(userDocRef);
       
       if (userDoc.exists()) {
-        onLogin(userDoc.data());
+        const userData = userDoc.data() as User;
+        if (userData.role === 'banned') {
+          const reason = userData.banReason || 'Community policy violations';
+          setError(`Your account is restricted: ${reason}`);
+          showError(`Account Banned: ${reason}`);
+          setIsLoading(false);
+          return;
+        }
+        onLogin(userData);
         showSuccess("Logged in successfully!");
       } else {
         const userData = {
@@ -285,7 +293,14 @@ export const Auth: React.FC<{
         try {
           const userDoc = await getDoc(userDocRef);
           if (userDoc.exists()) {
-            userData = userDoc.data();
+            userData = userDoc.data() as User;
+            if (userData.role === 'banned') {
+              const reason = userData.banReason || 'Community policy violations';
+              setError(`Your account is restricted: ${reason}`);
+              showError(`Account Banned: ${reason}`);
+              setIsLoading(false);
+              return;
+            }
           } else {
             const storedUser = localStorage.getItem(`demo_user_${uid}`);
             if (storedUser) {
@@ -381,25 +396,33 @@ export const Auth: React.FC<{
         referredBy,
         isProfileSetupComplete: true
       };
+
+      const { mobile, walletBalance, superChatBalance, ...publicData } = finalUser;
+      
+      const publicUserDoc = {
+        ...publicData,
+        isProfileSetupComplete: true
+      };
+
+      const privateUserDoc = {
+        mobile,
+        walletBalance,
+        superChatBalance,
+        updatedAt: Date.now()
+      };
       
       // Save to Firestore if not in demo mode
       if (!isDemoMode) {
         try {
-          // Use a promise race to prevent hanging indefinitely on network issues
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Firestore timeout")), 5000)
-          );
-          
-          await Promise.race([
-            setDoc(doc(db, 'users', finalUser.uid), finalUser),
-            timeoutPromise
-          ]);
+          // Batch these writes if possible, but keep it simple for now
+          await setDoc(doc(db, 'users', finalUser.uid), publicUserDoc);
+          await setDoc(doc(db, 'users', finalUser.uid, 'private', 'data'), privateUserDoc);
         } catch (err) {
-          console.warn("Firestore save failed or timed out, relying on localStorage:", err);
+          console.warn("Firestore save failed, relying on localStorage:", err);
           try {
             handleFirestoreError(err, OperationType.WRITE, `users/${finalUser.uid}`);
           } catch (e) {
-            // Already logged/thrown, continue for resilience
+            // Already logged/thrown
           }
         }
       }
@@ -419,7 +442,8 @@ export const Auth: React.FC<{
   };
 
   return (
-    <div className="h-full w-full bg-black flex flex-col items-center justify-center p-8 relative">
+    <div className="h-full w-full bg-black overflow-y-auto custom-scrollbar">
+      <div className="min-h-full w-full flex flex-col items-center justify-center p-8 relative">
       <button 
         onClick={onCancel}
         className="absolute top-10 left-6 text-zinc-500 hover:text-white transition-colors"
@@ -430,7 +454,7 @@ export const Auth: React.FC<{
       <motion.div 
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="w-full max-w-xs text-center"
+        className="w-full max-w-sm text-center py-10"
       >
         <div className="relative mx-auto mb-6">
           <Logo className="w-24 h-24 mx-auto" />
@@ -562,7 +586,7 @@ export const Auth: React.FC<{
             >
               <div className="flex flex-col items-center space-y-4">
                 <div className="relative group">
-                  <div className="w-28 h-28 rounded-full border-4 border-rose-500/20 p-1 relative overflow-hidden bg-zinc-900">
+                  <div className="w-32 h-32 rounded-full border-4 border-rose-500/20 p-1 relative overflow-hidden bg-zinc-900 shadow-2xl">
                     <img 
                       src={profileImage || pendingUser?.profileImage} 
                       alt="Profile Preview" 
@@ -574,11 +598,11 @@ export const Auth: React.FC<{
                       </div>
                     )}
                   </div>
-                  <label className="absolute bottom-0 right-0 bg-rose-500 p-2 rounded-full border-4 border-black cursor-pointer hover:bg-rose-600 transition-colors shadow-lg">
-                    <Camera size={16} className="text-white" />
+                  <label className="absolute bottom-0 right-0 bg-rose-500 w-10 h-10 rounded-full border-4 border-black cursor-pointer hover:bg-rose-600 transition-all shadow-lg flex items-center justify-center active:scale-90 group-hover:scale-110">
+                    <Camera size={18} className="text-white" />
                     <input 
                       type="file" 
-                      className="hidden" 
+                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" 
                       accept="image/*"
                       onChange={handleImageUpload}
                       disabled={isUploading}
@@ -652,6 +676,8 @@ export const Auth: React.FC<{
           <span className="text-[10px] font-bold uppercase tracking-widest">Secure OTP Login</span>
         </div>
       </motion.div>
+      <div id="recaptcha-container"></div>
     </div>
-  );
+  </div>
+);
 };

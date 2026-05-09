@@ -1,153 +1,187 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // ===============================================================
+    // -------------------------------------------------------------------------
+    // 0. Global Catch-All (Default Deny)
+    // -------------------------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
     // Helper Functions
-    // ===============================================================
-    
-    function isAuthenticated() {
+    // -------------------------------------------------------------------------
+    function isSignedIn() {
       return request.auth != null;
     }
 
     function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+      return isSignedIn() && request.auth.uid == userId;
     }
 
     function isAdmin() {
-      return isAuthenticated() && (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-        (request.auth.token.email == "abhishek2000singha@gmail.com" && request.auth.token.email_verified == true)
-      );
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
-    function hasRequiredFields(fields) {
-      return request.resource.data.keys().hasAll(fields);
+    function incoming() {
+      return request.resource.data;
     }
 
-    function hasOnlyAllowedFields(fields) {
-      return request.resource.data.keys().hasOnly(fields);
+    function existing() {
+      return resource.data;
     }
 
-    function isValidString(field, min, max) {
-      return request.resource.data[field] is string && 
-             request.resource.data[field].size() >= min && 
-             request.resource.data[field].size() <= max;
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    function isValidUrl(field) {
-      return request.resource.data[field] is string && 
-             (request.resource.data[field].matches("^https://.*") || request.resource.data[field].matches("^http://.*"));
-    }
-
-    // ===============================================================
-    // Domain Validators
-    // ===============================================================
-
-    function isValidUser(data) {
-      return hasRequiredFields(['uid', 'name', 'mobile']) &&
-             data.uid == request.auth.uid &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-             (!('bio' in data) || (data.bio is string && data.bio.size() <= 500)) &&
-             (!('role' in data) || data.role in ['user', 'admin', 'banned']);
-    }
-
-    function isValidVideo(data) {
-      return hasRequiredFields(['userId', 'videoUrl']) &&
-             data.userId == request.auth.uid &&
-             isValidUrl('videoUrl') &&
-             (!('caption' in data) || (data.caption is string && data.caption.size() <= 2000));
-    }
-
-    function isValidComment(data) {
-      return hasRequiredFields(['videoId', 'userId', 'text']) &&
-             data.userId == request.auth.uid &&
-             data.text is string && data.text.size() > 0 && data.text.size() <= 1000;
-    }
-
-    // ===============================================================
-    // Rules
-    // ===============================================================
-
-    // User Profiles
+    // -------------------------------------------------------------------------
+    // Collection: Users
+    // -------------------------------------------------------------------------
     match /users/{userId} {
-      allow read: if true;
-      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
-                      (!('role' in request.resource.data) || request.resource.data.role == 'user' || isAdmin());
-      allow update: if isAuthenticated() && (
-        (isOwner(userId) && isValidUser(request.resource.data) && 
-         (request.resource.data.role == resource.data.role || isAdmin()) &&
-         request.resource.data.walletBalance == resource.data.walletBalance) || 
-        isAdmin() ||
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followersCount', 'followingCount', 'totalLikes', 'totalViews'])
-      );
+      // Public User Profile
+      allow read: if isSignedIn();
+      
+      // Validation for Public Profile
+      function isValidPublicUser(data) {
+        return data.keys().hasAll(['uid', 'name']) &&
+               data.uid == userId &&
+               data.uid == request.auth.uid &&
+               data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+               (!('mobile' in data)) && // PII MUST go to private subcollection
+               (!('walletBalance' in data)) &&
+               (!('superChatBalance' in data)) &&
+               (!('bankAccountNumber' in data));
+      }
+
+      allow create: if isOwner(userId) && isValidPublicUser(incoming());
+      
+      allow update: if isOwner(userId) && 
+                      incoming().uid == userId &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['name', 'bio', 'profileImage', 'website', 'isPrivate', 'updatedAt', 'socialLinks', 'location', 'gender', 'dob', 'interests', 'followersCount', 'followingCount', 'totalViews', 'totalLikes', 'monetizationStatus', 'monetizationDate', 'policyViolations', 'lastActive', 'country', 'role']) && 
+                      (!('mobile' in incoming())) &&
+                      (!('walletBalance' in incoming())) &&
+                      (!('bankAccountNumber' in incoming()));
+
+      // Private User Data (PII & Financial)
+      match /private/data {
+        allow read: if isOwner(userId) || isAdmin();
+        
+        function isValidPrivateUser(data) {
+          return data.keys().hasAll(['walletBalance', 'superChatBalance']) &&
+                 data.walletBalance is number &&
+                 data.superChatBalance is number &&
+                 (data.mobile == null || (data.mobile is string && data.mobile.size() >= 10));
+        }
+
+        allow create, update: if (isOwner(userId) || isAdmin()) && isValidPrivateUser(incoming());
+      }
     }
 
-    // Follows
-    match /follows/{followId} {
-      allow read: if true;
-      allow create: if isAuthenticated() && request.resource.data.followerId == request.auth.uid;
-      allow delete: if isAuthenticated() && (resource.data.followerId == request.auth.uid || isAdmin());
-    }
-
-    // Videos
+    // -------------------------------------------------------------------------
+    // Collection: Videos
+    // -------------------------------------------------------------------------
     match /videos/{videoId} {
-      allow read: if true;
-      allow create: if isAuthenticated() && isValidVideo(request.resource.data);
-      allow update: if isAuthenticated() && (
-        (resource.data.userId == request.auth.uid && isValidVideo(request.resource.data)) ||
-        isAdmin() ||
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'viewsCount', 'sharesCount', 'commentsCount'])
-      );
-      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow read: if isSignedIn();
+      
+      function isValidVideo(data) {
+        return data.keys().hasAll(['userId', 'videoUrl']) &&
+               isValidId(data.userId) &&
+               data.videoUrl is string && data.videoUrl.size() > 0;
+      }
+
+      allow create: if isSignedIn() && isValidVideo(incoming()) && incoming().userId == request.auth.uid;
+      allow update: if (isSignedIn() && existing().userId == request.auth.uid) || isAdmin();
+      allow delete: if (isSignedIn() && existing().userId == request.auth.uid) || isAdmin();
     }
 
-    // Comments
+    // -------------------------------------------------------------------------
+    // Collection: Comments
+    // -------------------------------------------------------------------------
     match /comments/{commentId} {
-      allow read: if true;
-      allow create: if isAuthenticated() && isValidComment(request.resource.data);
-      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow update, delete: if (isSignedIn() && existing().userId == request.auth.uid) || isAdmin();
     }
 
-    // Boost Transactions
-    match /boost_transactions/{txId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+    // -------------------------------------------------------------------------
+    // Collection: Follows
+    // -------------------------------------------------------------------------
+    match /follows/{followId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && incoming().followerId == request.auth.uid;
+      allow delete: if (isSignedIn() && (existing().followerId == request.auth.uid || existing().followingId == request.auth.uid)) || isAdmin();
     }
 
-    // Payments & Withdrawals
-    match /payments/{paymentId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow write: if isAdmin();
+    // -------------------------------------------------------------------------
+    // Collection: Notifications
+    // -------------------------------------------------------------------------
+    match /notifications/{notifId} {
+      allow read: if isOwner(existing().userId);
+      allow create: if isSignedIn(); // Users notify each other
+      allow update: if isOwner(existing().userId) && incoming().diff(existing()).affectedKeys().hasOnly(['read']);
     }
-    
+
+    // -------------------------------------------------------------------------
+    // Collection: Super Chats
+    // -------------------------------------------------------------------------
+    match /super_chats/{chatId} {
+      allow read: if isSignedIn() && (resource.data.senderId == request.auth.uid || resource.data.receiverId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && incoming().senderId == request.auth.uid;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection: Withdrawal Requests
+    // -------------------------------------------------------------------------
     match /withdrawal_requests/{requestId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow create: if isOwner(incoming().userId);
       allow update: if isAdmin();
     }
 
-    // Admin Tasks
+    // -------------------------------------------------------------------------
+    // Collection: Transactions
+    // -------------------------------------------------------------------------
+    match /transactions/{txId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow create: if isOwner(incoming().userId) || isAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection: Boost Transactions
+    // -------------------------------------------------------------------------
+    match /boost_transactions/{txId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow create: if isOwner(incoming().userId) || isAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection: Admin Tasks
+    // -------------------------------------------------------------------------
     match /admin_tasks/{taskId} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin() || (isSignedIn() && resource.data.assignedToId == request.auth.uid);
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (isSignedIn() && resource.data.assignedToId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']));
     }
 
-    // Super Chats
-    match /super_chats/{chatId} {
-      allow read: if isAuthenticated() && (
-        resource.data.senderId == request.auth.uid || 
-        resource.data.receiverId == request.auth.uid || 
-        isAdmin()
-      );
-      allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
+    // -------------------------------------------------------------------------
+    // Collection: Chat Rooms (if exists)
+    // -------------------------------------------------------------------------
+    match /chat_rooms/{roomId} {
+      allow read, write: if isSignedIn() && (request.auth.uid in resource.data.participantIds || request.auth.uid in incoming().participantIds);
+      
+      match /messages/{msgId} {
+        allow read: if isSignedIn() && (get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.participantIds.hasAny([request.auth.uid]));
+        allow create: if isSignedIn() && incoming().senderId == request.auth.uid;
+      }
     }
-
-    // Notifications
-    match /notifications/{notifId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && isOwner(resource.data.userId); // Allow marking as read
-      allow delete: if isAuthenticated() && isOwner(resource.data.userId);
+    
+    // -------------------------------------------------------------------------
+    // Collection: Admins (Control List)
+    // -------------------------------------------------------------------------
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Only manageable via console
     }
   }
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Grid, Heart, Settings, Wallet, Rocket, CheckCircle2, IndianRupee, Eye, MessageCircle, Share2, LayoutDashboard, Camera, Edit3, Loader2, LogOut, ChevronLeft, Sparkles, Gift, Clock, AlertCircle, X, Landmark, Lock, Upload as UploadIcon, Link as LinkIcon } from 'lucide-react';
+import { User, Grid, Heart, Settings, Wallet, Rocket, CheckCircle2, IndianRupee, Eye, MessageCircle, Share2, LayoutDashboard, Camera, Edit3, Loader2, LogOut, ChevronLeft, Sparkles, Gift, Clock, AlertCircle, X, Landmark, Lock, Upload as UploadIcon, Link as LinkIcon, Facebook, Youtube, Linkedin, ExternalLink, Music, AtSign, Instagram, Twitter } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BOOST_PLANS, BoostPlan, User as UserType, BoostTransaction, Video as VideoType, Transaction as WalletTransaction, WithdrawalRequest } from '../types';
 import { rewardForAction } from '../services/monetizationService';
@@ -9,7 +9,7 @@ import { MonetizationDashboard } from './MonetizationDashboard';
 import { SuperChatModal } from './SuperChatModal';
 import { BoostModal } from './BoostModal';
 import confetti from 'canvas-confetti';
-import { doc, updateDoc, collection, addDoc, query, where, orderBy, onSnapshot, getDoc, writeBatch, increment, getDocs } from 'firebase/firestore';
+import { doc, updateDoc, setDoc, collection, addDoc, query, where, orderBy, onSnapshot, getDoc, writeBatch, increment, getDocs } from 'firebase/firestore';
 import { db, storage, isDemoMode } from '../services/firebase';
 import { handleFirestoreError, OperationType } from '../services/firestoreErrorHandler';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -80,6 +80,10 @@ export const Profile: React.FC<{
   const [editInstagram, setEditInstagram] = useState(currentUser.socialLinks?.instagram || '');
   const [editTwitter, setEditTwitter] = useState(currentUser.socialLinks?.twitter || '');
   const [editYoutube, setEditYoutube] = useState(currentUser.socialLinks?.youtube || '');
+  const [editFacebook, setEditFacebook] = useState(currentUser.socialLinks?.facebook || '');
+  const [editTiktok, setEditTiktok] = useState(currentUser.socialLinks?.tiktok || '');
+  const [editThreads, setEditThreads] = useState(currentUser.socialLinks?.threads || '');
+  const [editLinkedin, setEditLinkedin] = useState(currentUser.socialLinks?.linkedin || '');
   const [showSuperChat, setShowSuperChat] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -141,6 +145,10 @@ export const Profile: React.FC<{
       setEditInstagram(user.socialLinks?.instagram || '');
       setEditTwitter(user.socialLinks?.twitter || '');
       setEditYoutube(user.socialLinks?.youtube || '');
+      setEditFacebook(user.socialLinks?.facebook || '');
+      setEditTiktok(user.socialLinks?.tiktok || '');
+      setEditThreads(user.socialLinks?.threads || '');
+      setEditLinkedin(user.socialLinks?.linkedin || '');
     }
   }, [showEditModal, user]);
 
@@ -295,8 +303,8 @@ export const Profile: React.FC<{
         });
 
         // 2. Deduct from wallet balance
-        const userRef = doc(db, 'users', user.uid);
-        batch.update(userRef, {
+        const privateRef = doc(db, 'users', user.uid, 'private', 'data');
+        batch.update(privateRef, {
           walletBalance: increment(-amount)
         });
 
@@ -556,7 +564,11 @@ export const Profile: React.FC<{
         socialLinks: {
           instagram: editInstagram.trim(),
           twitter: editTwitter.trim(),
-          youtube: editYoutube.trim()
+          youtube: editYoutube.trim(),
+          facebook: editFacebook.trim(),
+          tiktok: editTiktok.trim(),
+          threads: editThreads.trim(),
+          linkedin: editLinkedin.trim()
         }
       };
 
@@ -567,24 +579,41 @@ export const Profile: React.FC<{
         }
       });
 
+      const { 
+        mobile, bankAccountNumber, ifscCode, accountHolderName, bankName, 
+        payoutType, swiftCode, iban, paypalEmail, walletBalance, superChatBalance,
+        ...publicData 
+      } = updatedData;
+
+      const privateData = {
+        mobile: mobile || user.mobile || null,
+        bankAccountNumber: bankAccountNumber || null,
+        ifscCode: ifscCode || null,
+        accountHolderName: accountHolderName || null,
+        bankName: bankName || null,
+        payoutType: payoutType || 'domestic',
+        swiftCode: swiftCode || null,
+        iban: iban || null,
+        paypalEmail: paypalEmail || null,
+        walletBalance: walletBalance ?? user.walletBalance ?? 0,
+        superChatBalance: superChatBalance ?? user.superChatBalance ?? 0,
+        updatedAt: Date.now()
+      };
+
       // Save to Firestore if not in demo mode
       if (!isDemoMode) {
         try {
           const userRef = doc(db, 'users', user.uid);
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Firestore timeout")), 5000)
-          );
+          const privateRef = doc(db, 'users', user.uid, 'private', 'data');
           
-          await Promise.race([
-            updateDoc(userRef, updatedData),
-            timeoutPromise
-          ]);
+          await updateDoc(userRef, publicData);
+          await setDoc(privateRef, privateData, { merge: true });
         } catch (err) {
-          console.warn("Firestore update failed or timed out, relying on localStorage:", err);
+          console.warn("Firestore update failed, relying on localStorage:", err);
           try {
             handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
           } catch (e) {
-            // Error logged and thrown, but we continue for local state resilience
+            // Error logged and thrown
           }
         }
       }
@@ -760,6 +789,23 @@ export const Profile: React.FC<{
             ) : (
               <p className="text-zinc-500 text-sm mt-2 font-medium italic">Digital Creator & Visionary</p>
             )}
+
+            {user.role === 'banned' && (
+              <div className="mt-4 px-6 py-3 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex flex-col items-center animate-in fade-in slide-in-from-top-2">
+                <div className="flex items-center space-x-2 text-rose-500 mb-1">
+                  <AlertCircle size={16} />
+                  <span className="text-[10px] uppercase font-black tracking-widest">Account Restricted</span>
+                </div>
+                <p className="text-[11px] text-zinc-400 text-center">
+                  Reason: {user.banReason || 'Policy violations'}
+                </p>
+                {user.banDate && (
+                  <p className="text-[8px] text-zinc-600 mt-1 uppercase font-bold">
+                    Effective: {format(user.banDate, 'dd MMM yyyy')}
+                  </p>
+                )}
+              </div>
+            )}
             {user.website && (
               <a 
                 href={user.website.startsWith('http') ? user.website : `https://${user.website}`}
@@ -772,15 +818,15 @@ export const Profile: React.FC<{
               </a>
             )}
             
-            <div className="flex items-center space-x-4 mt-4">
+            <div className="flex flex-wrap items-center justify-center gap-3 mt-4">
               {user.socialLinks?.instagram && (
                 <a 
                   href={`https://instagram.com/${user.socialLinks.instagram.replace('@', '')}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-8 h-8 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center text-zinc-400 hover:text-rose-500 transition-colors"
+                  className="w-9 h-9 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center text-zinc-400 hover:text-rose-500 hover:border-rose-500/30 transition-all hover:scale-110"
                 >
-                  <Camera size={14} />
+                  <Instagram size={16} />
                 </a>
               )}
               {user.socialLinks?.twitter && (
@@ -788,9 +834,19 @@ export const Profile: React.FC<{
                   href={`https://twitter.com/${user.socialLinks.twitter.replace('@', '')}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-8 h-8 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center text-zinc-400 hover:text-rose-500 transition-colors"
+                  className="w-9 h-9 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center text-zinc-400 hover:text-rose-500 hover:border-rose-500/30 transition-all hover:scale-110"
                 >
-                  <MessageCircle size={14} />
+                  <Twitter size={16} />
+                </a>
+              )}
+              {user.socialLinks?.facebook && (
+                <a 
+                  href={user.socialLinks.facebook.startsWith('http') ? user.socialLinks.facebook : `https://facebook.com/${user.socialLinks.facebook}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-9 h-9 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center text-zinc-400 hover:text-rose-500 hover:border-rose-500/30 transition-all hover:scale-110"
+                >
+                  <Facebook size={16} />
                 </a>
               )}
               {user.socialLinks?.youtube && (
@@ -798,27 +854,65 @@ export const Profile: React.FC<{
                   href={user.socialLinks.youtube.startsWith('http') ? user.socialLinks.youtube : `https://youtube.com/@${user.socialLinks.youtube.replace('@', '')}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-8 h-8 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center text-zinc-400 hover:text-rose-500 transition-colors"
+                  className="w-9 h-9 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center text-zinc-400 hover:text-rose-500 hover:border-rose-500/30 transition-all hover:scale-110"
                 >
-                  <Eye size={14} />
+                  <Youtube size={16} />
+                </a>
+              )}
+              {user.socialLinks?.tiktok && (
+                <a 
+                  href={`https://tiktok.com/@${user.socialLinks.tiktok.replace('@', '')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-9 h-9 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center text-zinc-400 hover:text-rose-500 hover:border-rose-500/30 transition-all hover:scale-110"
+                >
+                  <Music size={16} />
+                </a>
+              )}
+              {user.socialLinks?.linkedin && (
+                <a 
+                  href={user.socialLinks.linkedin.startsWith('http') ? user.socialLinks.linkedin : `https://linkedin.com/in/${user.socialLinks.linkedin}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-9 h-9 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center text-zinc-400 hover:text-rose-500 hover:border-rose-500/30 transition-all hover:scale-110"
+                >
+                  <Linkedin size={16} />
+                </a>
+              )}
+              {user.socialLinks?.threads && (
+                <a 
+                  href={`https://threads.net/@${user.socialLinks.threads.replace('@', '')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-9 h-9 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center text-zinc-400 hover:text-rose-500 hover:border-rose-500/30 transition-all hover:scale-110"
+                >
+                  <AtSign size={16} />
                 </a>
               )}
             </div>
           </div>
 
-          <div className="flex space-x-8 mt-10 glass-dark p-6 rounded-[32px] w-full max-w-sm justify-around shadow-2xl">
+          <div className="flex space-x-4 mt-8 glass-dark p-5 rounded-[28px] w-full max-w-[360px] justify-between shadow-2xl">
             <Stat 
               label="Followers" 
               value={formatNumber(user.followersCount)} 
               onClick={() => canSeeContent && setShowFollowersModal(true)}
             />
-            <div className="w-px h-10 bg-white/5 self-center" />
+            <div className="w-px h-8 bg-white/5 self-center" />
+            <Stat 
+              label="Following" 
+              value={formatNumber(user.followingCount)} 
+              onClick={() => canSeeContent && setShowFollowingModal(true)}
+            />
+            <div className="w-px h-8 bg-white/5 self-center" />
             <Stat 
               label="Videos" 
               value={formatNumber(userVideos.length)} 
             />
-            <div className="w-px h-10 bg-white/5 self-center" />
+            <div className="w-px h-8 bg-white/5 self-center" />
             <Stat label="Likes" value={formatNumber(user.totalLikes)} />
+            <div className="w-px h-8 bg-white/5 self-center" />
+            <Stat label="Views" value={formatNumber(user.totalViews)} />
           </div>
 
           {isOwnProfile && (
@@ -1715,7 +1809,7 @@ export const Profile: React.FC<{
               
               <div className="flex flex-col items-center space-y-6">
                 <div className="relative group">
-                  <div className="w-28 h-28 rounded-full border-4 border-zinc-800 overflow-hidden bg-zinc-900 relative">
+                  <div className="w-32 h-32 rounded-full border-4 border-zinc-800 overflow-hidden bg-zinc-900 relative shadow-2xl transition-transform duration-500 group-hover:scale-[1.02]">
                     <img src={editImage} alt="Preview" className="w-full h-full object-cover" />
                     {isUploading && (
                       <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
@@ -1723,11 +1817,11 @@ export const Profile: React.FC<{
                       </div>
                     )}
                   </div>
-                  <label className="absolute bottom-0 right-0 bg-rose-500 p-2 rounded-full border-2 border-zinc-900 text-white cursor-pointer hover:bg-rose-600 transition-colors shadow-lg">
-                    <Camera size={16} />
+                  <label className="absolute bottom-1 right-1 bg-rose-500 w-10 h-10 rounded-full border-4 border-zinc-900 text-white cursor-pointer hover:bg-rose-600 transition-all shadow-lg flex items-center justify-center active:scale-90 z-20 hover:scale-110">
+                    <Camera size={18} />
                     <input 
                       type="file" 
-                      className="hidden" 
+                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" 
                       accept="image/*"
                       onChange={handleImageUpload}
                       disabled={isUploading}
@@ -1822,9 +1916,55 @@ export const Profile: React.FC<{
                           type="text"
                           value={editYoutube}
                           onChange={(e) => setEditYoutube(e.target.value)}
-                          placeholder="Channel name or URL"
+                          placeholder="Channel URL or username"
                           className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 px-4 mt-1 focus:outline-none focus:border-rose-500 transition-colors font-bold text-sm"
                         />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Facebook</label>
+                        <input 
+                          type="text"
+                          value={editFacebook}
+                          onChange={(e) => setEditFacebook(e.target.value)}
+                          placeholder="Profile URL or ID"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 px-4 mt-1 focus:outline-none focus:border-rose-500 transition-colors font-bold text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">TikTok</label>
+                        <div className="relative mt-1">
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-bold text-xs">@</span>
+                          <input 
+                            type="text"
+                            value={editTiktok}
+                            onChange={(e) => setEditTiktok(e.target.value)}
+                            placeholder="username"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-8 pr-4 focus:outline-none focus:border-rose-500 transition-colors font-bold text-sm"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">LinkedIn</label>
+                        <input 
+                          type="text"
+                          value={editLinkedin}
+                          onChange={(e) => setEditLinkedin(e.target.value)}
+                          placeholder="Profile URL or username"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 px-4 mt-1 focus:outline-none focus:border-rose-500 transition-colors font-bold text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Threads</label>
+                        <div className="relative mt-1">
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-bold text-xs">@</span>
+                          <input 
+                            type="text"
+                            value={editThreads}
+                            onChange={(e) => setEditThreads(e.target.value)}
+                            placeholder="username"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-8 pr-4 focus:outline-none focus:border-rose-500 transition-colors font-bold text-sm"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>

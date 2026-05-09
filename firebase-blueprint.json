@@ -49,6 +49,25 @@
       },
       "required": ["uid", "name", "mobile"]
     },
+    "PrivateUserData": {
+      "title": "PrivateUserData",
+      "description": "Sensitive user information and financial data",
+      "type": "object",
+      "properties": {
+        "mobile": { "type": "string" },
+        "walletBalance": { "type": "number" },
+        "superChatBalance": { "type": "number" },
+        "bankAccountNumber": { "type": "string" },
+        "ifscCode": { "type": "string" },
+        "accountHolderName": { "type": "string" },
+        "bankName": { "type": "string" },
+        "payoutType": { "type": "string" },
+        "swiftCode": { "type": "string" },
+        "iban": { "type": "string" },
+        "paypalEmail": { "type": "string" },
+        "updatedAt": { "type": "integer" }
+      }
+    },
     "Video": {
       "title": "Video",
       "description": "Video content information",
@@ -115,6 +134,10 @@
     "/users/{userId}": {
       "schema": "User",
       "description": "User profile documents"
+    },
+    "/users/{userId}/private/data": {
+      "schema": "PrivateUserData",
+      "description": "Sensitive user data (PII and Financial)"
     },
     "/videos/{videoId}": {
       "schema": "Video",

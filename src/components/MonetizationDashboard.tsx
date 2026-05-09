@@ -62,8 +62,8 @@ export const MonetizationDashboard: React.FC<MonetizationDashboardProps> = ({ us
       });
 
       // 2. Deduct from wallet balance
-      const userRef = doc(db, 'users', user.uid);
-      batch.update(userRef, {
+      const privateRef = doc(db, 'users', user.uid, 'private', 'data');
+      batch.update(privateRef, {
         walletBalance: increment(-amount)
       });
 

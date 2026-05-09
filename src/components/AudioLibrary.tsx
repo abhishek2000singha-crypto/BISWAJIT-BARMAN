@@ -40,6 +40,39 @@ const MOCK_AUDIO_TRACKS: AudioTrack[] = [
     isTrending: true
   },
   {
+    id: 't1',
+    title: 'Naatu Naatu',
+    artist: 'M. M. Keeravani',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-16.mp3',
+    thumbnailUrl: 'https://picsum.photos/seed/telugu1/100/100',
+    duration: 215,
+    language: 'Telugu',
+    genre: 'Dance',
+    isTrending: true
+  },
+  {
+    id: 'tm1',
+    title: 'Enjoy Enjaami',
+    artist: 'Dhee ft. Arivu',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-14.mp3',
+    thumbnailUrl: 'https://picsum.photos/seed/tamil1/100/100',
+    duration: 188,
+    language: 'Tamil',
+    genre: 'Folk',
+    isTrending: true
+  },
+  {
+    id: 'p1',
+    title: 'Proper Patola',
+    artist: 'Diljit Dosanjh',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-13.mp3',
+    thumbnailUrl: 'https://picsum.photos/seed/punjabi1/100/100',
+    duration: 175,
+    language: 'Punjabi',
+    genre: 'Party',
+    isTrending: true
+  },
+  {
     id: 'b1',
     title: 'Tumi Jake Bhalobaso',
     artist: 'Iman Chakraborty',
@@ -61,16 +94,6 @@ const MOCK_AUDIO_TRACKS: AudioTrack[] = [
     isTrending: true
   },
   {
-    id: 'b3',
-    title: 'Ami Banglay Gaan Gai',
-    artist: 'Pratul Mukhopadhyay',
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-12.mp3',
-    thumbnailUrl: 'https://picsum.photos/seed/bengali3/100/100',
-    duration: 215,
-    language: 'Bengali',
-    genre: 'Patriotic'
-  },
-  {
     id: 'n1',
     title: 'Phool Butte Sari',
     artist: 'Milan Newar',
@@ -85,7 +108,7 @@ const MOCK_AUDIO_TRACKS: AudioTrack[] = [
     id: 'n2',
     title: 'Kutu Ma Kutu',
     artist: 'Rajan Raj Shiwakoti',
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3',
     thumbnailUrl: 'https://picsum.photos/seed/nepali2/100/100',
     duration: 185,
     language: 'Nepali',
@@ -102,20 +125,21 @@ const MOCK_AUDIO_TRACKS: AudioTrack[] = [
     genre: 'Patriotic'
   },
   {
-    id: 'a2',
-    title: 'Buku Hom Hom Kore',
-    artist: 'Bhupen Hazarika',
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3',
-    thumbnailUrl: 'https://picsum.photos/seed/assamese2/100/100',
-    duration: 250,
-    language: 'Assamese',
-    genre: 'Folk'
+    id: 'm1',
+    title: 'Sairat Zaala Ji',
+    artist: 'Ajay-Atul',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3',
+    thumbnailUrl: 'https://picsum.photos/seed/marathi1/100/100',
+    duration: 230,
+    language: 'Marathi',
+    genre: 'Romantic',
+    isTrending: true
   },
   {
     id: 'e1',
     title: 'Summer Vibes',
     artist: 'Lofi Girl',
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-16.mp3',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
     thumbnailUrl: 'https://picsum.photos/seed/lofi/100/100',
     duration: 150,
     language: 'English',
@@ -137,43 +161,11 @@ const MOCK_AUDIO_TRACKS: AudioTrack[] = [
     id: 'e3',
     title: 'Blinding Lights',
     artist: 'The Weeknd',
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-13.mp3',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-12.mp3',
     thumbnailUrl: 'https://picsum.photos/seed/weeknd/100/100',
     duration: 200,
     language: 'English',
     genre: 'Pop',
-    isTrending: true
-  },
-  {
-    id: 'e4',
-    title: 'Levitating',
-    artist: 'Dua Lipa',
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-14.mp3',
-    thumbnailUrl: 'https://picsum.photos/seed/dua/100/100',
-    duration: 203,
-    language: 'English',
-    genre: 'Pop',
-    isTrending: true
-  },
-  {
-    id: 'h4',
-    title: 'Raataan Lambiyan',
-    artist: 'Jubin Nautiyal',
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3',
-    thumbnailUrl: 'https://picsum.photos/seed/hindi4/100/100',
-    duration: 225,
-    language: 'Hindi',
-    genre: 'Romantic'
-  },
-  {
-    id: 'h5',
-    title: 'Nacho Nacho',
-    artist: 'Rahul Sipligunj',
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3',
-    thumbnailUrl: 'https://picsum.photos/seed/hindi5/100/100',
-    duration: 210,
-    language: 'Hindi',
-    genre: 'Dance',
     isTrending: true
   }
 ];
@@ -184,7 +176,7 @@ interface AudioLibraryProps {
   selectedTrackId?: string;
 }
 
-const LANGUAGES = ['All', 'Hindi', 'Bengali', 'Nepali', 'Assamese', 'English'];
+const LANGUAGES = ['All', 'Hindi', 'Bengali', 'Tamil', 'Telugu', 'Punjabi', 'Marathi', 'Nepali', 'Assamese', 'English'];
 const GENRES = ['All', 'Trending', 'Romantic', 'Party', 'Folk', 'Pop', 'Dance', 'Patriotic', 'Lofi', 'Electronic'];
 
 export const AudioLibrary: React.FC<AudioLibraryProps> = ({ onSelect, onClose, selectedTrackId }) => {

@@ -686,28 +686,17 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
       onClick={togglePlay}
     >
       {video.type === 'video' ? (
-        <div className="relative h-full w-full flex items-center justify-center">
-          {/* Blurred Thumbnail Loading State */}
-          <AnimatePresence>
-            {isBuffering && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="absolute inset-0 z-10"
-              >
-                <img
-                  src={video.thumbnailUrl}
-                  className="h-full w-full object-cover blur-2xl scale-110 opacity-50"
-                  alt=""
-                  referrerPolicy="no-referrer"
-                />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-12 h-12 border-4 border-rose-500/20 border-t-rose-500 rounded-full animate-spin" />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+        <div className="relative h-full w-full flex items-center justify-center bg-zinc-950">
+          {/* Immersive Background Blur for better responsiveness on all aspect ratios */}
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            <video
+              src={shouldLoad ? getVideoUrl() : ''}
+              className="h-full w-full object-cover blur-[80px] opacity-30 scale-110"
+              muted
+              playsInline
+              loop
+            />
+          </div>
 
           <motion.video
             ref={videoRef}
@@ -716,7 +705,10 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
             initial={{ opacity: 0 }}
             animate={{ opacity: isBuffering ? 0 : 1 }}
             transition={{ duration: 0.5 }}
-            className={cn("h-full w-full object-contain relative z-0", video.filter && !video.filter.includes('(') && video.filter)}
+            className={cn(
+              "h-full w-full object-contain relative z-10 drop-shadow-[0_0_50px_rgba(0,0,0,0.5)]", 
+              video.filter && !video.filter.includes('(') && video.filter
+            )}
             style={{ filter: video.filter?.includes('(') ? video.filter : undefined }}
             loop
             playsInline
@@ -762,12 +754,22 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video: initialVideo, curre
         />
         </div>
       ) : (
-        <img
-          src={shouldLoad ? video.videoUrl : video.thumbnailUrl}
-          className="h-full w-full object-contain"
-          alt={video.caption || 'Photo Post'}
-          referrerPolicy="no-referrer"
-        />
+        <div className="relative h-full w-full flex items-center justify-center bg-zinc-950">
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            <img
+              src={video.videoUrl}
+              className="h-full w-full object-cover blur-[80px] opacity-30 scale-110"
+              alt=""
+              referrerPolicy="no-referrer"
+            />
+          </div>
+          <img
+            src={shouldLoad ? video.videoUrl : video.thumbnailUrl}
+            className="h-full w-full object-contain relative z-10 drop-shadow-[0_0_50px_rgba(0,0,0,0.5)]"
+            alt={video.caption || 'Photo Post'}
+            referrerPolicy="no-referrer"
+          />
+        </div>
       )}
 
       {/* Overlay UI */}

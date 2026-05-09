@@ -7,6 +7,7 @@ import { LogoText } from './Logo';
 import { cn } from '../utils';
 import { Loader2, RefreshCcw, Search } from 'lucide-react';
 import { useError } from '../contexts/ErrorContext';
+import { motion } from 'framer-motion';
 
 export const Feed: React.FC<{ 
   currentUser: User | null, 
@@ -288,32 +289,38 @@ export const Feed: React.FC<{
   return (
     <div className="h-full w-full relative">
       {/* Floating Header */}
-      <div className="absolute top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-10 pointer-events-none">
-        <LogoText className="scale-75 origin-left drop-shadow-lg" />
-        <div className="flex space-x-4 pointer-events-auto">
+      <div className="absolute top-0 left-0 right-0 z-50 flex items-center justify-between px-6 pt-safe pb-6 pointer-events-none">
+        <LogoText className="scale-[0.8] origin-left drop-shadow-2xl" />
+        <div className="flex space-x-6 pointer-events-auto mt-4">
           <button 
             onClick={() => setFeedType('foryou')}
             className={cn(
-              "font-bold text-sm transition-all drop-shadow-md",
-              feedType === 'foryou' ? "text-white border-b-2 border-white pb-1" : "text-white/60 pb-1"
+              "font-black text-sm transition-all drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] uppercase tracking-widest",
+              feedType === 'foryou' ? "text-white scale-110" : "text-white/60 hover:text-white/80"
             )}
           >
             For You
+            {feedType === 'foryou' && (
+              <motion.div layoutId="feed-tab" className="h-1 bg-rose-500 rounded-full mt-1 mx-auto w-4" />
+            )}
           </button>
           <button 
             onClick={() => {
               if (!currentUser) {
-                alert("Please login to see following feed");
+                showError("Please login to see following feed");
                 return;
               }
               setFeedType('following');
             }}
             className={cn(
-              "font-bold text-sm transition-all drop-shadow-md",
-              feedType === 'following' ? "text-white border-b-2 border-white pb-1" : "text-white/60 pb-1"
+              "font-black text-sm transition-all drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] uppercase tracking-widest",
+              feedType === 'following' ? "text-white scale-110" : "text-white/60 hover:text-white/80"
             )}
           >
             Following
+            {feedType === 'following' && (
+              <motion.div layoutId="feed-tab" className="h-1 bg-rose-500 rounded-full mt-1 mx-auto w-4" />
+            )}
           </button>
         </div>
         <div className="w-10 h-10" /> {/* Spacer */}

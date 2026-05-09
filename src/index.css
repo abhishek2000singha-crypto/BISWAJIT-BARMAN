@@ -28,6 +28,14 @@
   .text-gradient {
     @apply bg-clip-text text-transparent bg-gradient-to-r from-rose-500 to-amber-500;
   }
+
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
 }
 
 @keyframes shimmer {

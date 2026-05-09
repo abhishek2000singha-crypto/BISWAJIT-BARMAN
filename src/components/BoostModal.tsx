@@ -33,11 +33,11 @@ export const BoostModal: React.FC<BoostModalProps> = ({ currentUser, video, onCl
       const creatorShare = isOwnVideo ? 0 : boostAmount * 0.5; // Creator gets 50% if someone else boosts
       const platformFee = boostAmount - creatorShare;
 
-      const boosterRef = doc(db, 'users', currentUser.uid);
+      const boosterPrivateRef = doc(db, 'users', currentUser.uid, 'private', 'data');
 
       // 1. Deduct from wallet if selected
       if (paymentSource === 'wallet') {
-        await updateDoc(boosterRef, {
+        await updateDoc(boosterPrivateRef, {
           walletBalance: increment(-boostAmount)
         });
 
@@ -75,8 +75,8 @@ export const BoostModal: React.FC<BoostModalProps> = ({ currentUser, video, onCl
 
       // 3. If someone else boosted, give share to creator
       if (!isOwnVideo) {
-        const creatorRef = doc(db, 'users', video.userId);
-        await updateDoc(creatorRef, {
+        const creatorPrivateRef = doc(db, 'users', video.userId, 'private', 'data');
+        await updateDoc(creatorPrivateRef, {
           walletBalance: increment(creatorShare)
         });
 

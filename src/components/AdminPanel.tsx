@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Users, Video, TrendingUp, DollarSign, ShieldCheck, Ban, Trash2, CheckCircle, XCircle, Loader2, CreditCard, AlertTriangle, LogOut, Search, Landmark, ChevronDown, ChevronUp, Sparkles, Gift, IndianRupee, Wallet, Plus, ClipboardList, Clock, CheckCircle2, X, Calendar, CloudUpload, Rocket, UserPlus, Activity, BarChart3, PieChart as PieChartIcon, Send, History } from 'lucide-react';
 import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, orderBy, getDocs, writeBatch, getDoc, increment, addDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
-import { User as UserType, Video as VideoType, BoostTransaction, AdminTask } from '../types';
+import { User as UserType, Video as VideoType, BoostTransaction, AdminTask, SuperChat, WithdrawalRequest } from '../types';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useUpload } from '../contexts/UploadContext';
@@ -33,8 +33,8 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
   const [allUsers, setAllUsers] = useState<UserType[]>([]);
   const [allVideos, setAllVideos] = useState<VideoType[]>([]);
   const [transactions, setTransactions] = useState<BoostTransaction[]>([]);
-  const [withdrawalRequests, setWithdrawalRequests] = useState<any[]>([]);
-  const [superChats, setSuperChats] = useState<any[]>([]);
+  const [withdrawalRequests, setWithdrawalRequests] = useState<WithdrawalRequest[]>([]);
+  const [superChats, setSuperChats] = useState<SuperChat[]>([]);
   const [tasks, setTasks] = useState<AdminTask[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -56,11 +56,14 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
   const [withdrawalSearchQuery, setWithdrawalSearchQuery] = useState('');
   const [superChatSearchQuery, setSuperChatSearchQuery] = useState('');
   const [taskSearchQuery, setTaskSearchQuery] = useState('');
+  const [auditSearchQuery, setAuditSearchQuery] = useState('');
   const [taskAssigneeFilter, setTaskAssigneeFilter] = useState('all');
   const [walletSearchQuery, setWalletSearchQuery] = useState('');
   const [expandedWithdrawalId, setExpandedWithdrawalId] = useState<string | null>(null);
   const [showRejectionModal, setShowRejectionModal] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [showBanModal, setShowBanModal] = useState<{ userId: string, name: string } | null>(null);
+  const [banReasonInput, setBanReasonInput] = useState('');
   const [videoDateFilter, setVideoDateFilter] = useState<'all' | '7d' | '30d' | 'custom'>('all');
   const [videoSortField, setVideoSortField] = useState<'createdAt' | 'viewsCount' | 'likesCount' | 'commentsCount'>('createdAt');
   const [videoSortOrder, setVideoSortOrder] = useState<'asc' | 'desc'>('desc');
@@ -212,7 +215,7 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
     const qSuperChats = query(collection(db, 'super_chats'), orderBy('createdAt', 'asc'));
     const unsubSuperChats = onSnapshot(qSuperChats, (snapshot) => {
       const chats = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-      setSuperChats([...chats].reverse());
+      setSuperChats([...chats].reverse() as SuperChat[]);
     }, (error) => {
       console.error("Error listening to super chats:", error);
       showError("Failed to sync super chat data");
@@ -221,12 +224,12 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
     // Withdrawal Requests
     const qWithdrawals = query(collection(db, 'withdrawal_requests'), orderBy('createdAt', 'desc'));
     const unsubWithdrawals = onSnapshot(qWithdrawals, (snapshot) => {
-      const requests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      const requests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as WithdrawalRequest));
       setWithdrawalRequests(requests);
       
       const completedPayouts = requests
-        .filter((r: any) => r.status === 'approved')
-        .reduce((acc: number, curr: any) => acc + (curr.amount || 0), 0);
+        .filter(r => r.status === 'approved')
+        .reduce((acc, curr) => acc + (curr.amount || 0), 0);
       setTotalPayouts(completedPayouts);
       
       setStats(prev => prev.map(s => 
@@ -381,14 +384,58 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
   };
 
   const handleUserAction = async (userId: string, currentRole: string) => {
+    if (currentRole !== 'banned') {
+      const user = allUsers.find(u => u.uid === userId);
+      setShowBanModal({ userId, name: user?.name || 'User' });
+      return;
+    }
+
     setActionLoading(userId);
     try {
       const userRef = doc(db, 'users', userId);
-      const newRole = currentRole === 'banned' ? 'user' : 'banned';
-      await updateDoc(userRef, { role: newRole });
+      await updateDoc(userRef, { 
+        role: 'user',
+        banReason: null,
+        banDate: null
+      });
+      showSuccess("User unbanned successfully");
     } catch (error) {
       console.error(error);
-      alert("Failed to update user status");
+      showError("Failed to unban user");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const confirmBan = async () => {
+    if (!showBanModal || !banReasonInput.trim()) return;
+    const { userId } = showBanModal;
+
+    setActionLoading(userId);
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, { 
+        role: 'banned',
+        banReason: banReasonInput.trim(),
+        banDate: Date.now()
+      });
+
+      // Send notification
+      sendNotification({
+        userId: userId,
+        senderId: 'system',
+        senderName: 'System',
+        senderProfileImage: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png',
+        type: 'system',
+        message: `Your account has been restricted. Reason: ${banReasonInput.trim()}`
+      });
+
+      setShowBanModal(null);
+      setBanReasonInput('');
+      showSuccess("User banned successfully");
+    } catch (error) {
+      console.error(error);
+      showError("Failed to ban user");
     } finally {
       setActionLoading(null);
     }
@@ -411,16 +458,16 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
     setActionLoading(showSendMoneyModal.uid);
     try {
       const batch = writeBatch(db);
-      const userRef = doc(db, 'users', showSendMoneyModal.uid);
-      const adminRef = doc(db, 'users', currentUser.uid);
+      const userPrivateRef = doc(db, 'users', showSendMoneyModal.uid, 'private', 'data');
+      const adminPrivateRef = doc(db, 'users', currentUser.uid, 'private', 'data');
 
       // Add to user
-      batch.update(userRef, {
+      batch.update(userPrivateRef, {
         walletBalance: increment(amount)
       });
 
       // Deduct from admin
-      batch.update(adminRef, {
+      batch.update(adminPrivateRef, {
         walletBalance: increment(-amount)
       });
 
@@ -539,8 +586,8 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
         showSuccess(`Withdrawal of ₹${amount} approved.`);
       } else {
         // Refund the user if rejected
-        const userRef = doc(db, 'users', userId);
-        await updateDoc(userRef, {
+        const privateRef = doc(db, 'users', userId, 'private', 'data');
+        await updateDoc(privateRef, {
           walletBalance: increment(amount)
         });
 
@@ -683,6 +730,12 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
           className={`pb-2 text-sm font-bold transition-colors ${activeTab === 'monitoring' ? 'text-white border-b-2 border-rose-500' : 'text-zinc-500'}`}
         >
           Monitoring
+        </button>
+        <button 
+          onClick={() => setActiveTab('audit')}
+          className={`pb-2 text-sm font-bold transition-colors ${activeTab === 'audit' ? 'text-white border-b-2 border-rose-500' : 'text-zinc-500'}`}
+        >
+          Audit
         </button>
         <button 
           onClick={() => setActiveTab('users')}
@@ -1305,6 +1358,159 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
         </div>
       )}
 
+      {activeTab === 'audit' && (
+        <div className="space-y-8">
+          {/* Filters Section */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Financial Audit Logs</h3>
+            <div className="relative w-full md:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+              <input 
+                type="text"
+                placeholder="Search tx ID, user, or date..."
+                value={auditSearchQuery}
+                onChange={(e) => setAuditSearchQuery(e.target.value)}
+                className="bg-zinc-900 border border-zinc-800 rounded-xl py-2 pl-9 pr-8 text-xs focus:outline-none focus:border-rose-500 transition-colors w-full"
+              />
+              {auditSearchQuery && (
+                <button 
+                  onClick={() => setAuditSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Boost Transactions Table */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-[32px] overflow-hidden">
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Rocket className="text-amber-500" size={18} />
+                <h4 className="font-bold">Boost Transactions</h4>
+              </div>
+              <span className="text-[10px] bg-amber-500/10 text-amber-500 px-2 py-0.5 rounded-full font-bold">
+                {transactions.length} Total
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="text-[10px] text-zinc-500 uppercase tracking-widest bg-zinc-950/30">
+                    <th className="px-6 py-4 font-bold">Date & ID</th>
+                    <th className="px-6 py-4 font-bold">User</th>
+                    <th className="px-6 py-4 font-bold">Plan</th>
+                    <th className="px-6 py-4 font-bold text-right">Amount</th>
+                    <th className="px-6 py-4 font-bold">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800/50">
+                  {transactions
+                    .filter(tx => 
+                      tx.id.toLowerCase().includes(auditSearchQuery.toLowerCase()) ||
+                      tx.userId.toLowerCase().includes(auditSearchQuery.toLowerCase()) ||
+                      tx.planName.toLowerCase().includes(auditSearchQuery.toLowerCase())
+                    )
+                    .map(tx => (
+                    <tr key={tx.id} className="text-xs hover:bg-white/5 transition-colors">
+                      <td className="px-6 py-4">
+                        <p className="font-bold text-zinc-300">{format(tx.createdAt, 'dd MMM yyyy, HH:mm')}</p>
+                        <p className="text-[8px] text-zinc-600 font-mono">TX: {tx.id}</p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center space-x-2">
+                          <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold">
+                            {tx.userId.slice(0, 1).toUpperCase()}
+                          </div>
+                          <span className="font-mono text-zinc-400">@{tx.userId.slice(0, 8)}...</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-zinc-300 font-medium">{tx.planName}</p>
+                        <p className="text-[9px] text-zinc-600">Video: {tx.videoId.slice(0, 8)}...</p>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <span className="font-black text-emerald-500 text-sm">₹{tx.amount}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tighter bg-emerald-500/10 text-emerald-500">
+                          Success
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {transactions.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-10 text-center text-zinc-500 italic">No transactions found</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Super Chats Table */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-[32px] overflow-hidden">
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Gift className="text-rose-500" size={18} />
+                <h4 className="font-bold">Super Chat Audit</h4>
+              </div>
+              <span className="text-[10px] bg-rose-500/10 text-rose-500 px-2 py-0.5 rounded-full font-bold">
+                {superChats.length} Total
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="text-[10px] text-zinc-500 uppercase tracking-widest bg-zinc-950/30">
+                    <th className="px-6 py-4 font-bold">Date & ID</th>
+                    <th className="px-6 py-4 font-bold">Sender</th>
+                    <th className="px-6 py-4 font-bold">Receiver</th>
+                    <th className="px-6 py-4 font-bold text-right">Total</th>
+                    <th className="px-6 py-4 font-bold text-right">Comm (30%)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800/50">
+                  {superChats
+                    .filter(chat => 
+                      chat.id.toLowerCase().includes(auditSearchQuery.toLowerCase()) ||
+                      chat.senderName.toLowerCase().includes(auditSearchQuery.toLowerCase()) ||
+                      chat.receiverName.toLowerCase().includes(auditSearchQuery.toLowerCase())
+                    )
+                    .map(chat => (
+                    <tr key={chat.id} className="text-xs hover:bg-white/5 transition-colors">
+                      <td className="px-6 py-4">
+                        <p className="font-bold text-zinc-300">{format(chat.createdAt, 'dd MMM yyyy, HH:mm')}</p>
+                        <p className="text-[8px] text-zinc-600 font-mono">ID: {chat.id}</p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-zinc-400">@{chat.senderName}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-zinc-400">@{chat.receiverName}</span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <span className="font-bold text-zinc-300">₹{chat.amount}</span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <span className="font-black text-emerald-500 text-sm">₹{(chat.amount * 0.3).toFixed(2)}</span>
+                      </td>
+                    </tr>
+                  ))}
+                  {superChats.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-10 text-center text-zinc-500 italic">No super chat transactions found</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'users' && (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
@@ -1374,13 +1580,20 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
                         <span className="text-xs text-zinc-400 font-medium">{user.mobile || 'No mobile'}</span>
                       </td>
                       <td className="px-6 py-4">
-                        <span className={cn(
-                          "px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest",
-                          user.role === 'banned' ? "bg-rose-500/10 text-rose-500" : 
-                          user.role === 'admin' ? "bg-amber-500/10 text-amber-500" : "bg-emerald-500/10 text-emerald-500"
-                        )}>
-                          {user.role === 'banned' ? 'Banned' : user.role === 'admin' ? 'Admin' : 'Active'}
-                        </span>
+                        <div className="flex flex-col space-y-1">
+                          <span className={cn(
+                            "px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest self-start",
+                            user.role === 'banned' ? "bg-rose-500/10 text-rose-500" : 
+                            user.role === 'admin' ? "bg-amber-500/10 text-amber-500" : "bg-emerald-500/10 text-emerald-500"
+                          )}>
+                            {user.role === 'banned' ? 'Banned' : user.role === 'admin' ? 'Admin' : 'Active'}
+                          </span>
+                          {user.role === 'banned' && user.banReason && (
+                            <p className="text-[9px] text-rose-500/60 italic max-w-[150px] truncate" title={user.banReason}>
+                              Reason: {user.banReason}
+                            </p>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4">
                         <span className="text-xs font-black text-emerald-500">₹{(user.walletBalance || 0).toLocaleString()}</span>
@@ -2514,6 +2727,61 @@ export const AdminPanel: React.FC<{ currentUser: UserType, onLogout?: () => void
                 </button>
                 <button 
                   onClick={() => setShowRejectionModal(null)}
+                  className="w-full bg-zinc-800 text-white py-4 rounded-2xl font-bold hover:bg-zinc-700 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Ban User Modal */}
+      <AnimatePresence>
+        {showBanModal && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowBanModal(null)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-[32px] p-8 shadow-2xl"
+            >
+              <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Ban className="text-rose-500" size={32} />
+              </div>
+              <h3 className="text-xl font-bold mb-1">Ban User</h3>
+              <p className="text-zinc-500 text-sm mb-6 flex flex-col">
+                <span>Restrict access for @{showBanModal.name}</span>
+                <span className="text-rose-500 text-[10px] uppercase font-black mt-1">This will block all platform features</span>
+              </p>
+              
+              <div className="space-y-4 mb-8">
+                <textarea 
+                  placeholder="Reason for ban (e.g. Policy violation, spam...)"
+                  value={banReasonInput}
+                  onChange={(e) => setBanReasonInput(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-4 px-4 focus:outline-none focus:border-rose-500 transition-colors text-sm min-h-[100px] resize-none"
+                />
+              </div>
+
+              <div className="flex flex-col space-y-3">
+                <button 
+                  onClick={confirmBan}
+                  disabled={!banReasonInput.trim() || actionLoading === showBanModal.userId}
+                  className="w-full bg-rose-500 text-white py-4 rounded-2xl font-bold hover:bg-rose-600 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
+                >
+                  {actionLoading === showBanModal.userId ? <Loader2 className="animate-spin" /> : <span>Confirm Ban</span>}
+                </button>
+                <button 
+                  onClick={() => setShowBanModal(null)}
                   className="w-full bg-zinc-800 text-white py-4 rounded-2xl font-bold hover:bg-zinc-700 transition-colors"
                 >
                   Cancel

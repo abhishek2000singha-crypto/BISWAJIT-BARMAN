@@ -35,8 +35,8 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
   const handleBuyCredits = async () => {
     setIsLoading(true);
     try {
-      const userRef = doc(db, 'users', currentUser.uid);
-      await updateDoc(userRef, {
+      const privateRef = doc(db, 'users', currentUser.uid, 'private', 'data');
+      await updateDoc(privateRef, {
         superChatBalance: increment(selectedPack.amount)
       });
 
@@ -79,22 +79,22 @@ export const SuperChatModal: React.FC<SuperChatModalProps> = ({ currentUser, tar
       const platformFee = giftAmount * 0.3;
       const creatorShare = giftAmount - platformFee;
 
-      const senderRef = doc(db, 'users', currentUser.uid);
-      const receiverRef = doc(db, 'users', targetUser.uid);
+      const senderPrivateRef = doc(db, 'users', currentUser.uid, 'private', 'data');
+      const receiverPrivateRef = doc(db, 'users', targetUser.uid, 'private', 'data');
 
       // 1. Deduct from sender
       if (paymentSource === 'super_chat_balance') {
-        await updateDoc(senderRef, {
+        await updateDoc(senderPrivateRef, {
           superChatBalance: increment(-giftAmount)
         });
       } else {
-        await updateDoc(senderRef, {
+        await updateDoc(senderPrivateRef, {
           walletBalance: increment(-giftAmount)
         });
       }
 
       // 2. Add to receiver's wallet (earnings) - 70% share
-      await updateDoc(receiverRef, {
+      await updateDoc(receiverPrivateRef, {
         walletBalance: increment(creatorShare)
       });
 

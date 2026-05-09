@@ -40,10 +40,16 @@ export interface User {
     instagram?: string;
     twitter?: string;
     youtube?: string;
+    facebook?: string;
+    tiktok?: string;
+    threads?: string;
+    linkedin?: string;
   };
   lastActive?: number;
   createdAt: number;
   isProfileSetupComplete?: boolean;
+  banReason?: string;
+  banDate?: number;
 }
 
 export interface SuperChat {
@@ -51,8 +57,12 @@ export interface SuperChat {
   senderId: string;
   senderName: string;
   receiverId: string;
+  receiverName: string;
   amount: number;
+  creatorShare: number;
+  platformFee: number;
   message: string;
+  videoId?: string;
   createdAt: number;
 }
 
@@ -205,12 +215,12 @@ export interface WithdrawalRequest {
   userName: string;
   amount: number;
   status: 'pending' | 'approved' | 'rejected';
-  payoutType: 'domestic' | 'international';
   bankDetails: {
+    payoutType: 'domestic' | 'international';
     accountNumber: string;
     accountHolderName: string;
     bankName: string;
-    ifscCode?: string;
+    ifsc?: string;
     swiftCode?: string;
     iban?: string;
     country?: string;

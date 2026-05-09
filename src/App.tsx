@@ -108,9 +108,10 @@ export default function App() {
         const userRef = doc(db, 'users', firebaseUser.uid);
         
         // Initial check
-        let userDoc;
         try {
-          userDoc = await getDoc(userRef);
+          const userDoc = await getDoc(userRef);
+          const privateDoc = await getDoc(doc(db, 'users', firebaseUser.uid, 'private', 'data'));
+          
           if (!userDoc.exists()) {
             // Check localStorage fallback
             const storedUser = localStorage.getItem(`demo_user_${firebaseUser.uid}`);
@@ -122,7 +123,10 @@ export default function App() {
               return;
             }
           } else {
-            setUser(userDoc.data());
+            setUser({ 
+              ...userDoc.data(), 
+              ...(privateDoc.exists() ? privateDoc.data() : {}) 
+            });
           }
         } catch (err) {
           console.warn("Firestore check failed in App.tsx, checking localStorage:", err);
@@ -135,12 +139,25 @@ export default function App() {
           }
         }
 
-        // Real-time listener
-        unsubscribeSnapshot = onSnapshot(userRef, (doc) => {
+        // Real-time listener for public data
+        const unsubPublic = onSnapshot(userRef, (doc) => {
           if (doc.exists()) {
-            setUser(doc.data());
+            setUser(prev => ({ ...prev, ...doc.data() }));
           }
         });
+
+        // Real-time listener for private data
+        const privateRef = doc(db, 'users', firebaseUser.uid, 'private', 'data');
+        const unsubPrivate = onSnapshot(privateRef, (doc) => {
+          if (doc.exists()) {
+            setUser(prev => ({ ...prev, ...doc.data() }));
+          }
+        });
+
+        unsubscribeSnapshot = () => {
+          unsubPublic();
+          unsubPrivate();
+        };
 
         // Notifications listener
         const q = query(
@@ -296,7 +313,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className="flex flex-col h-screen bg-black text-white max-w-md mx-auto relative overflow-hidden shadow-2xl border-x border-white/10">
+      <div className="flex flex-col h-[100dvh] bg-black text-white w-full max-w-md mx-auto relative overflow-hidden shadow-2xl border-x border-white/10 selection:bg-rose-500/30">
         {/* Main Content Area */}
         <main className="flex-1 overflow-hidden relative">
           {renderContent()}
@@ -442,7 +459,7 @@ export default function App() {
       <GlobalAudioPlayer />
 
       {/* Bottom Navigation */}
-      <nav className="h-16 bg-black border-t border-white/10 flex items-center justify-around px-2 z-50">
+      <nav className="min-h-[85px] bg-black border-t border-white/10 flex items-center justify-around px-1 z-50 pb-safe">
         <NavButton 
           icon={<Home size={24} />} 
           label="Home" 
@@ -453,19 +470,19 @@ export default function App() {
           }} 
         />
         <NavButton 
-          icon={<Search size={24} />} 
+          icon={<Search size={22} />} 
           label="Discover" 
           active={activeTab === 'discover'} 
           onClick={() => setActiveTab('discover')} 
         />
         <NavButton 
-          icon={<MessageSquare size={24} />} 
-          label="Messages" 
+          icon={<MessageSquare size={22} />} 
+          label="Chat" 
           active={activeTab === 'messages'} 
           onClick={() => setActiveTab('messages')} 
         />
         <NavButton 
-          icon={<Bell size={24} />} 
+          icon={<Bell size={22} />} 
           label="Inbox" 
           active={activeTab === 'notifications'} 
           onClick={() => setActiveTab('notifications')} 
@@ -473,15 +490,15 @@ export default function App() {
         />
         <button 
           onClick={() => setActiveTab('upload')}
-          className="flex flex-col items-center justify-center -mt-4"
+          className="flex flex-col items-center justify-center -mt-6"
         >
-          <div className="bg-white text-black p-2 rounded-lg shadow-lg hover:scale-110 transition-transform">
-            <PlusSquare size={28} />
+          <div className="bg-white text-black p-2 rounded-xl shadow-lg hover:scale-110 transition-transform">
+            <PlusSquare size={24} />
           </div>
         </button>
         {user?.role === 'admin' && (
           <NavButton 
-            icon={<LayoutDashboard size={24} />} 
+            icon={<LayoutDashboard size={22} />} 
             label="Admin" 
             active={activeTab === 'admin'} 
             onClick={() => setActiveTab('admin')} 
@@ -491,7 +508,10 @@ export default function App() {
           icon={<UserIcon size={24} />} 
           label="Profile" 
           active={activeTab === 'profile'} 
-          onClick={() => setActiveTab('profile')} 
+          onClick={() => {
+            setViewingProfileId(null);
+            setActiveTab('profile');
+          }} 
         />
       </nav>
     </div>
@@ -511,7 +531,7 @@ function NavButton({ icon, label, active, onClick, badge }: { icon: React.ReactN
           {badge > 9 ? '9+' : badge}
         </span>
       )}
-      <span className="text-[10px] font-medium">{label}</span>
+      <span className="text-[9px] font-bold uppercase tracking-tighter">{label}</span>
       {active && (
         <motion.div 
           layoutId="nav-indicator" 
